@@ -1,0 +1,17 @@
+# VCS generated files
+sim/build/
+csrc/
+simv
+simv.daidir/
+ucli.key
+*.vpd
+*.vcd
+*.fsdb
+*.log
+*.jou
+*.pb
+
+# Editor/OS files
+.DS_Store
+*.swp
+*~
