@@ -9,21 +9,42 @@ package ddr4_ctrl_pkg;
   parameter int APB_ADDR_W = 32;
   parameter int APB_DATA_W = 32;
 
-  parameter int DDR_ROW_W  = 16;
-  parameter int DDR_COL_W  = 10;
-  parameter int DDR_BANK_W = 3;
-  parameter int DDR_BG_W   = 2;
+  // Micron MT40A512M8 / MT40A256M16 4Gb DDR4 SDRAM geometry.
+  parameter int DDR_ADDR_W = 17; // A[16:0] model port; A[14:0] row used for 4Gb
+  parameter int DDR_ROW_W  = 15; // 32K rows
+  parameter int DDR_COL_W  = 10; // 1K columns
+  parameter int DDR_BANK_W = 2;  // BA[1:0], 4 banks per bank group
+  parameter int DDR_BG_W   = 2;  // x8 uses BG[1:0]; x16 uses BG0 only
+  parameter int DDR_DQ_W   = 16; // default simulation build uses x16
+  parameter int DDR_DM_W   = DDR_DQ_W / 8;
 
-  typedef enum logic [3:0] {
-    DDR_CMD_NOP  = 4'h0,
-    DDR_CMD_ACT  = 4'h1,
-    DDR_CMD_RD   = 4'h2,
-    DDR_CMD_WR   = 4'h3,
-    DDR_CMD_PRE  = 4'h4,
-    DDR_CMD_REF  = 4'h5,
-    DDR_CMD_MRS  = 4'h6,
-    DDR_CMD_ZQCL = 4'h7
+  // DDR4 command abstraction used inside controller/model.
+  typedef enum logic [4:0] {
+    DDR_CMD_DES  = 5'h00,
+    DDR_CMD_NOP  = 5'h01,
+    DDR_CMD_ACT  = 5'h02,
+    DDR_CMD_RD   = 5'h03,
+    DDR_CMD_RDA  = 5'h04,
+    DDR_CMD_WR   = 5'h05,
+    DDR_CMD_WRA  = 5'h06,
+    DDR_CMD_PRE  = 5'h07,
+    DDR_CMD_PREA = 5'h08,
+    DDR_CMD_REF  = 5'h09,
+    DDR_CMD_MRS  = 5'h0a,
+    DDR_CMD_ZQCL = 5'h0b,
+    DDR_CMD_ZQCS = 5'h0c,
+    DDR_CMD_SRE  = 5'h0d,
+    DDR_CMD_SRX  = 5'h0e,
+    DDR_CMD_PDE  = 5'h0f,
+    DDR_CMD_PDX  = 5'h10,
+    DDR_CMD_UNK  = 5'h1f
   } ddr_cmd_e;
+
+  typedef enum logic [1:0] {
+    DDR_BURST_FIXED = 2'b00,
+    DDR_BURST_INCR  = 2'b01,
+    DDR_BURST_WRAP  = 2'b10
+  } axi_burst_e;
 
   typedef struct packed {
     logic [AXI_ADDR_W-1:0] addr;
@@ -39,5 +60,15 @@ package ddr4_ctrl_pkg;
     logic [DDR_ROW_W-1:0]  row;
     logic [DDR_COL_W-1:0]  col;
   } ddr_addr_t;
+
+  // Conservative cycle values for 500 MHz controller clock, useful for RTL/model smoke tests.
+  // Timing will be refined per selected speed bin and PHY ratio.
+  parameter int T_RCD_CK  = 8;
+  parameter int T_RP_CK   = 8;
+  parameter int T_RAS_CK  = 18;
+  parameter int T_RC_CK   = 26;
+  parameter int T_MRD_CK  = 8;
+  parameter int T_MOD_CK  = 24;
+  parameter int T_ZQINIT_CK = 512;
 
 endpackage : ddr4_ctrl_pkg
