@@ -1,5 +1,9 @@
 # DDR4 Controller Specification Notes
 
+## Datasheet Source
+
+- Micron Automotive DDR4 SDRAM, MT40A512M8 / MT40A256M16, 4Gb x8/x16, Rev. L 03/2021.
+
 ## Interface Requirements
 
 ### AXI4 Slave Interface
@@ -18,10 +22,69 @@
 - Address width: 32 bits
 - Used for controller configuration and DDR4 mode-register related controls.
 
+## DDR4 Device Geometry Used By Current Model
+
+| Item | x8 | x16 |
+| --- | --- | --- |
+| Density | 4Gb | 4Gb |
+| Organization | 512 Meg x 8 | 256 Meg x 16 |
+| Bank groups | 4, BG[1:0] | 2, BG0 |
+| Banks per group | 4, BA[1:0] | 4, BA[1:0] |
+| Row address | 32K, A[14:0] | 32K, A[14:0] |
+| Column address | 1K, A[9:0] | 1K, A[9:0] |
+| Page size | 1KB | 2KB |
+
+The default simulation build currently uses x16 mode because it maps naturally to a 16-bit DDR4 DQ model and two DQS/DM bytes.
+
+## Command/Address Model
+
+The DDR4 model decodes the command bus using:
+
+- CS_n
+- ACT_n
+- RAS_n/A16
+- CAS_n/A15
+- WE_n/A14
+- A10/AP
+- A12/BC_n reserved for later burst-chop support
+- BG/BA for bank group/bank and MRS selection
+
+Implemented first-stage command checks:
+
+- DES / NOP
+- ACT
+- READ / READ with auto-precharge
+- WRITE / WRITE with auto-precharge
+- PRE / PREA
+- REF
+- MRS
+- ZQCL / ZQCS
+
+## Initialization Sequence Skeleton
+
+The controller now has an APB-triggered initialization sequence based on the datasheet order:
+
+```text
+RESET_n deassert
+CKE high
+MRS MR3
+MRS MR6
+MRS MR5
+MRS MR4
+MRS MR2
+MRS MR1
+MRS MR0
+ZQCL
+READY
+```
+
+The current implementation uses simulation-oriented wait counters for tMRD/tMOD/ZQCL and must still be refined for exact speed-bin timing.
+
 ## Clocking
 
 - Target controller operating frequency: 500 MHz.
-- Timing closure must be considered from the beginning because 500 MHz is aggressive for a DDR4 controller core.
+- Testbench clock period: 2 ns.
+- The datasheet supports speed grades including DDR4-2400, DDR4-2666, and DDR4-3200; exact CL/CWL/timing selection remains a configuration item.
 
 ## RTL Coding Policy
 
@@ -34,8 +97,8 @@
 
 ```text
 AXI slave frontend
-  -> command decoder
   -> transaction splitter / burst handler
+  -> address mapper
   -> DDR4 scheduler
   -> bank machine / timing checker
   -> command generator
@@ -45,10 +108,10 @@ AXI slave frontend
   -> DDR4 simulation model for VCS
 ```
 
-## Open Items
+## Current Model Limitations
 
-- Exact DDR4 device organization from datasheet
-- Timing parameter extraction: tRCD, tRP, tRAS, tRC, tWR, tWTR, tCCD, tRRD, tFAW, tRFC, refresh interval
-- PHY boundary definition
-- DQS training/write leveling abstraction level
-- VREF/ODT/IO primitive modeling strategy
+- Data storage array is not yet implemented.
+- DQ/DQS timing and bidirectional data burst are not yet implemented.
+- CRC, DBI, DM behavior, CA parity, ODT electrical behavior, write leveling, VREF training, and MPR are not yet implemented.
+- tCCD_S/tCCD_L, tRRD_S/tRRD_L, tFAW, tWTR, tWR, tRFC, and refresh scheduling still need to be added.
+- Controller AXI frontend is still held off after initialization; real transaction scheduling is the next RTL step.
