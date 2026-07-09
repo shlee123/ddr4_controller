@@ -1,21 +1,20 @@
 // SPDX-License-Identifier: MIT
 // Version 2 DDR4 DQ/DQS burst-data PHY shim.
 //
-// This is a synthesizable controller-side burst shim used by the VCS model.
-// It abstracts the real FPGA/ASIC DDR I/O cells but preserves the DDR4 BL8
-// concept: eight DQ unit intervals per READ/WRITE burst, with DQS toggling
-// during WRITE and data captured during READ.
+// Synthesis-oriented controller-side burst shim.
+// This module keeps I/O-cell-specific behavior at the top boundary through
+// explicit output, output-enable, and input signals.  No internal tri-state is used.
 
 `timescale 1ns/1ps
 
 import ddr4_ctrl_pkg::*;
 
 module ddr4_dq_dqs_phy #(
-  parameter int DQ_W   = DDR_DQ_W,
-  parameter int DM_W   = DDR_DM_W,
+  parameter int DQ_W     = DDR_DQ_W,
+  parameter int DM_W     = DDR_DM_W,
   parameter int BURST_UI = DDR_BL8_UI,
-  parameter int CL_CK  = T_CL_CK,
-  parameter int CWL_CK = T_CWL_CK
+  parameter int CL_CK    = T_CL_CK,
+  parameter int CWL_CK   = T_CWL_CK
 )(
   input  logic                         clk,
   input  logic                         rst_n,
@@ -31,10 +30,14 @@ module ddr4_dq_dqs_phy #(
   output logic                         rd_valid,
   output logic                         rd_busy,
 
-  inout  wire  [DQ_W-1:0]              ddr_dq,
-  inout  wire  [DM_W-1:0]              ddr_dqs_t,
-  inout  wire  [DM_W-1:0]              ddr_dqs_c,
-  inout  wire  [DM_W-1:0]              ddr_dm_n
+  input  logic [DQ_W-1:0]              dq_in,
+  output logic [DQ_W-1:0]              dq_out,
+  output logic                         dq_oe,
+  output logic [DM_W-1:0]              dm_out,
+  output logic                         dm_oe,
+  output logic [DM_W-1:0]              dqs_t_out,
+  output logic [DM_W-1:0]              dqs_c_out,
+  output logic                         dqs_oe
 );
 
   typedef enum logic [1:0] {
@@ -46,26 +49,52 @@ module ddr4_dq_dqs_phy #(
 
   phy_state_e state;
   logic [7:0] latency_cnt;
-  logic [$clog2(BURST_UI+1)-1:0] ui_cnt;
-  logic [DQ_W-1:0] dq_out;
-  logic [DM_W-1:0] dm_out;
-  logic            dq_oe;
-  logic            dqs_oe;
+  logic [3:0] ui_cnt;
   logic [DQ_W*BURST_UI-1:0] rd_shift;
 
-  assign ddr_dq    = dq_oe  ? dq_out : 'z;
-  assign ddr_dm_n  = dq_oe  ? dm_out : 'z;
-  assign ddr_dqs_t = dqs_oe ? {DM_W{clk}} : 'z;
-  assign ddr_dqs_c = dqs_oe ? {DM_W{~clk}} : 'z;
+  function automatic logic [DQ_W-1:0] select_dq_ui(
+    input logic [DQ_W*BURST_UI-1:0] data,
+    input logic [3:0] ui
+  );
+    logic [DQ_W-1:0] selected;
+    begin
+      selected = '0;
+      for (int i = 0; i < BURST_UI; i++) begin
+        if (ui == i[3:0]) begin
+          selected = data[i*DQ_W +: DQ_W];
+        end
+      end
+      return selected;
+    end
+  endfunction
+
+  function automatic logic [DM_W-1:0] select_dm_ui(
+    input logic [DM_W*BURST_UI-1:0] data,
+    input logic [3:0] ui
+  );
+    logic [DM_W-1:0] selected;
+    begin
+      selected = '1;
+      for (int i = 0; i < BURST_UI; i++) begin
+        if (ui == i[3:0]) begin
+          selected = data[i*DM_W +: DM_W];
+        end
+      end
+      return selected;
+    end
+  endfunction
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       state       <= PHY_IDLE;
-      latency_cnt <= '0;
-      ui_cnt      <= '0;
+      latency_cnt <= 8'd0;
+      ui_cnt      <= 4'd0;
       dq_out      <= '0;
       dm_out      <= '1;
       dq_oe       <= 1'b0;
+      dm_oe       <= 1'b0;
+      dqs_t_out   <= '0;
+      dqs_c_out   <= '1;
       dqs_oe      <= 1'b0;
       wr_busy     <= 1'b0;
       wr_done     <= 1'b0;
@@ -79,11 +108,15 @@ module ddr4_dq_dqs_phy #(
 
       unique case (state)
         PHY_IDLE: begin
-          dq_oe   <= 1'b0;
-          dqs_oe  <= 1'b0;
-          wr_busy <= 1'b0;
-          rd_busy <= 1'b0;
-          ui_cnt  <= '0;
+          dq_oe       <= 1'b0;
+          dm_oe       <= 1'b0;
+          dqs_oe      <= 1'b0;
+          dqs_t_out   <= '0;
+          dqs_c_out   <= '1;
+          wr_busy     <= 1'b0;
+          rd_busy     <= 1'b0;
+          ui_cnt      <= 4'd0;
+          latency_cnt <= 8'd0;
 
           if (wr_start) begin
             state       <= PHY_WLAT;
@@ -99,49 +132,56 @@ module ddr4_dq_dqs_phy #(
 
         PHY_WLAT: begin
           wr_busy <= 1'b1;
-          if (latency_cnt != 0) begin
-            latency_cnt <= latency_cnt - 1'b1;
+          if (latency_cnt != 8'd0) begin
+            latency_cnt <= latency_cnt - 8'd1;
           end else begin
             state  <= PHY_WBURST;
             dq_oe  <= 1'b1;
+            dm_oe  <= 1'b1;
             dqs_oe <= 1'b1;
-            ui_cnt <= '0;
+            ui_cnt <= 4'd0;
           end
         end
 
         PHY_WBURST: begin
-          wr_busy <= 1'b1;
-          dq_out  <= wr_data[ui_cnt*DQ_W +: DQ_W];
-          dm_out  <= wr_dm_n[ui_cnt*DM_W +: DM_W];
-          if (ui_cnt == BURST_UI-1) begin
+          wr_busy   <= 1'b1;
+          dq_out    <= select_dq_ui(wr_data, ui_cnt);
+          dm_out    <= select_dm_ui(wr_dm_n, ui_cnt);
+          dqs_t_out <= {DM_W{ui_cnt[0]}};
+          dqs_c_out <= {DM_W{~ui_cnt[0]}};
+
+          if (ui_cnt == (BURST_UI-1)) begin
             state   <= PHY_IDLE;
             dq_oe   <= 1'b0;
+            dm_oe   <= 1'b0;
             dqs_oe  <= 1'b0;
             wr_done <= 1'b1;
           end else begin
-            ui_cnt <= ui_cnt + 1'b1;
+            ui_cnt <= ui_cnt + 4'd1;
           end
         end
 
         PHY_RLAT: begin
           rd_busy <= 1'b1;
-          if (latency_cnt != 0) begin
-            latency_cnt <= latency_cnt - 1'b1;
+          if (latency_cnt != 8'd0) begin
+            latency_cnt <= latency_cnt - 8'd1;
           end else begin
-            rd_shift[ui_cnt*DQ_W +: DQ_W] <= ddr_dq;
-            if (ui_cnt == BURST_UI-1) begin
+            rd_shift[ui_cnt*DQ_W +: DQ_W] <= dq_in;
+            if (ui_cnt == (BURST_UI-1)) begin
               rd_data  <= rd_shift;
-              rd_data[ui_cnt*DQ_W +: DQ_W] <= ddr_dq;
+              rd_data[ui_cnt*DQ_W +: DQ_W] <= dq_in;
               rd_valid <= 1'b1;
               rd_busy  <= 1'b0;
               state    <= PHY_IDLE;
             end else begin
-              ui_cnt <= ui_cnt + 1'b1;
+              ui_cnt <= ui_cnt + 4'd1;
             end
           end
         end
 
-        default: state <= PHY_IDLE;
+        default: begin
+          state <= PHY_IDLE;
+        end
       endcase
     end
   end
