@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-// DDR4 controller top-level, Version 2.
-// Synthesis-oriented RTL skeleton with AXI burst-read support and DDR4 BL8 DQ/DQS PHY shim.
+// DDR4 controller top-level, Version 2.1.
+// Integrated async AXI/APB-to-DDR scheduler, read-priority policy, AW/AR FIFOs,
+// async request/response FIFOs, and 64-line direct-mapped cache.
 
 import ddr4_ctrl_pkg::*;
 
@@ -15,6 +16,12 @@ module ddr4_controller_top #(
   parameter int DDR_DQ_W   = 16,
   parameter int DDR_DM_W   = DDR_DQ_W/8
 )(
+  // AXI/APB clock domain, target 200 MHz.
+  input  logic                     axi_clk,
+  input  logic                     axi_rst_n,
+
+  // DDR controller/PHY command clock domain, target 500 MHz.
+  // The original V2 port names are preserved and now represent the DDR domain.
   input  logic                     clk,
   input  logic                     rst_n,
 
@@ -89,7 +96,12 @@ module ddr4_controller_top #(
   localparam logic [APB_ADDR_W-1:0] REG_MR5    = 'h34;
   localparam logic [APB_ADDR_W-1:0] REG_MR6    = 'h38;
 
-  typedef enum logic [3:0] {
+  localparam int AWF_W       = AXI_ADDR_W + 8 + 3 + 2;
+  localparam int REQ_W       = $bits(ddr_req_t);
+  localparam int RSP_W       = $bits(ddr_rsp_t);
+  localparam int CACHE_IDX_W = $clog2(CACHE_LINES);
+
+  typedef enum logic [4:0] {
     INIT_RESET,
     INIT_WAIT_CKE,
     INIT_MR3,
@@ -100,101 +112,41 @@ module ddr4_controller_top #(
     INIT_MR1,
     INIT_MR0,
     INIT_ZQCL,
-    INIT_READY
-  } init_state_e;
-
-  typedef enum logic [3:0] {
+    INIT_ZQWAIT,
+    INIT_READY,
     APP_IDLE,
     APP_ACT,
     APP_TRCD,
-    APP_RD_CMD,
-    APP_RD_WAIT,
-    APP_RD_SEND,
-    APP_WR_IGNORE,
-    APP_WR_RESP
-  } app_state_e;
+    APP_WR,
+    APP_RD,
+    APP_RLAT,
+    APP_PRE,
+    APP_TRP,
+    APP_RESP
+  } ctrl_state_e;
 
-  init_state_e init_state;
-  app_state_e  app_state;
+  typedef struct packed {
+    logic [AXI_ADDR_W-1:0] addr;
+    logic [7:0]            len;
+    logic [2:0]            size;
+    logic [1:0]            burst;
+  } axi_addr_chan_t;
 
-  logic        init_start;
+  ctrl_state_e state;
+  logic [15:0] wait_cnt;
   logic        init_done;
+  logic        init_start;
   logic [16:0] mr [0:6];
-  logic [9:0]  wait_cnt;
-  logic [9:0]  app_wait_cnt;
-  logic        apb_wr;
-  logic        apb_rd;
 
-  logic [AXI_ADDR_W-1:0] rd_base_addr;
-  logic [AXI_ADDR_W-1:0] rd_cur_addr;
-  logic [7:0]            rd_len;
-  logic [7:0]            rd_idx;
-  logic [2:0]            rd_size;
-  logic [1:0]            rd_burst;
+  logic apb_wr, apb_rd;
+  assign apb_wr  = psel & penable & pwrite;
+  assign apb_rd  = psel & penable & ~pwrite;
+  assign pready  = psel & penable;
+  assign pslverr = 1'b0;
 
-  logic phy_rd_start;
-  logic phy_rd_busy;
-  logic phy_rd_valid;
-  logic [DDR_DQ_W*DDR_BL8_UI-1:0] phy_rd_data;
-
-  logic phy_wr_start;
-  logic phy_wr_busy;
-  logic phy_wr_done;
-  logic [DDR_DQ_W*DDR_BL8_UI-1:0] phy_wr_data;
-  logic [DDR_DM_W*DDR_BL8_UI-1:0] phy_wr_dm_n;
-
-  logic [DDR_DQ_W-1:0] phy_dq_in;
-  logic [DDR_DQ_W-1:0] phy_dq_out;
-  logic                phy_dq_oe;
-  logic [DDR_DM_W-1:0] phy_dm_out;
-  logic                phy_dm_oe;
-  logic [DDR_DM_W-1:0] phy_dqs_t_out;
-  logic [DDR_DM_W-1:0] phy_dqs_c_out;
-  logic                phy_dqs_oe;
-
-  assign ddr_ck_t  = clk;
-  assign ddr_ck_c  = ~clk;
-  assign apb_wr    = psel & penable & pwrite;
-  assign apb_rd    = psel & penable & ~pwrite;
-  assign pready    = psel & penable;
-  assign pslverr   = 1'b0;
-  assign phy_dq_in = ddr_dq;
-
-  // Top-level tri-state mapping.  In ASIC/FPGA implementation, replace this boundary
-  // with technology I/O cells.  Internal RTL uses explicit data/OE signals.
-  assign ddr_dq    = phy_dq_oe  ? phy_dq_out    : 'z;
-  assign ddr_dm_n  = phy_dm_oe  ? phy_dm_out    : 'z;
-  assign ddr_dqs_t = phy_dqs_oe ? phy_dqs_t_out : 'z;
-  assign ddr_dqs_c = phy_dqs_oe ? phy_dqs_c_out : 'z;
-
-  function automatic logic [AXI_ADDR_W-1:0] axi_next_addr(
-    input logic [AXI_ADDR_W-1:0] base,
-    input logic [AXI_ADDR_W-1:0] cur,
-    input logic [7:0] len,
-    input logic [2:0] size,
-    input logic [1:0] burst
-  );
-    logic [AXI_ADDR_W-1:0] beat_bytes;
-    logic [AXI_ADDR_W-1:0] wrap_bytes;
-    logic [AXI_ADDR_W-1:0] wrap_mask;
-    logic [AXI_ADDR_W-1:0] next_linear;
-    begin
-      beat_bytes  = {{(AXI_ADDR_W-1){1'b0}}, 1'b1} << size;
-      wrap_bytes  = beat_bytes * ({{(AXI_ADDR_W-8){1'b0}}, len} + {{(AXI_ADDR_W-1){1'b0}}, 1'b1});
-      wrap_mask   = wrap_bytes - {{(AXI_ADDR_W-1){1'b0}}, 1'b1};
-      next_linear = cur + beat_bytes;
-      unique case (burst)
-        2'b00: axi_next_addr = cur; // FIXED
-        2'b01: axi_next_addr = next_linear; // INCR
-        2'b10: axi_next_addr = (base & ~wrap_mask) | (next_linear & wrap_mask); // WRAP
-        default: axi_next_addr = next_linear;
-      endcase
-    end
-  endfunction
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      init_start <= 1'b0;
+  always_ff @(posedge axi_clk or negedge axi_rst_n) begin
+    if (!axi_rst_n) begin
+      init_start <= 1'b1;
       mr[0] <= 17'h0000;
       mr[1] <= 17'h0001;
       mr[2] <= 17'h0002;
@@ -235,253 +187,333 @@ module ddr4_controller_top #(
     end
   end
 
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      init_state   <= INIT_RESET;
-      app_state    <= APP_IDLE;
-      wait_cnt     <= '0;
-      app_wait_cnt <= '0;
-      init_done    <= 1'b0;
-      ddr_reset_n  <= 1'b0;
-      ddr_cke      <= 1'b0;
-      ddr_odt      <= 1'b0;
-      ddr_par      <= 1'b0;
-      ddr_cs_n     <= 1'b1;
-      ddr_act_n    <= 1'b1;
-      ddr_ras_n    <= 1'b1;
-      ddr_cas_n    <= 1'b1;
-      ddr_we_n     <= 1'b1;
-      ddr_bg       <= '0;
-      ddr_ba       <= '0;
-      ddr_a        <= '0;
-      rd_base_addr <= '0;
-      rd_cur_addr  <= '0;
-      rd_len       <= '0;
-      rd_idx       <= '0;
-      rd_size      <= '0;
-      rd_burst     <= '0;
-      phy_rd_start <= 1'b0;
-      phy_wr_start <= 1'b0;
-      phy_wr_data  <= '0;
-      phy_wr_dm_n  <= '1;
-      s_axi_rdata  <= '0;
-      s_axi_rresp  <= 2'b00;
-      s_axi_rlast  <= 1'b0;
+  // AXI AW/AR front-end FIFOs: eight entries each.
+  axi_addr_chan_t aw_in, aw_out, ar_in, ar_out;
+  assign aw_in = '{addr:s_axi_awaddr, len:s_axi_awlen, size:s_axi_awsize, burst:s_axi_awburst};
+  assign ar_in = '{addr:s_axi_araddr, len:s_axi_arlen, size:s_axi_arsize, burst:s_axi_arburst};
+
+  logic awf_wr, awf_rd, awf_full, awf_empty;
+  logic arf_wr, arf_rd, arf_full, arf_empty;
+
+  sync_fifo #(.WIDTH(AWF_W), .DEPTH(AXI_AW_FIFO_DEPTH)) u_aw_fifo (
+    .clk(axi_clk), .rst_n(axi_rst_n), .wr_en(awf_wr), .wr_data(aw_in), .full(awf_full),
+    .rd_en(awf_rd), .rd_data(aw_out), .empty(awf_empty));
+
+  sync_fifo #(.WIDTH(AWF_W), .DEPTH(AXI_AR_FIFO_DEPTH)) u_ar_fifo (
+    .clk(axi_clk), .rst_n(axi_rst_n), .wr_en(arf_wr), .wr_data(ar_in), .full(arf_full),
+    .rd_en(arf_rd), .rd_data(ar_out), .empty(arf_empty));
+
+  assign s_axi_awready = !awf_full;
+  assign awf_wr        = s_axi_awvalid && s_axi_awready;
+  assign s_axi_arready = !arf_full;
+  assign arf_wr        = s_axi_arvalid && s_axi_arready;
+
+  ddr_req_t wr_req_in, rd_req_in, wr_req_out, rd_req_out;
+  ddr_rsp_t rsp_in, rsp_out, rsp_hold;
+  logic wr_req_wr, rd_req_wr, wr_req_rd, rd_req_rd;
+  logic wr_req_full, rd_req_full, wr_req_afull, rd_req_afull;
+  logic wr_req_empty, rd_req_empty;
+  logic rsp_wr, rsp_rd, rsp_full, rsp_afull, rsp_empty;
+
+  assign wr_req_in = '{wr:1'b1, addr:aw_out.addr, wdata:s_axi_wdata, wstrb:s_axi_wstrb,
+                       len:aw_out.len, size:aw_out.size, burst:aw_out.burst};
+  assign rd_req_in = '{wr:1'b0, addr:ar_out.addr, wdata:'0, wstrb:'0,
+                       len:ar_out.len, size:ar_out.size, burst:ar_out.burst};
+
+  assign s_axi_wready = !awf_empty && !wr_req_full;
+  assign wr_req_wr    = s_axi_wvalid && s_axi_wready;
+  assign awf_rd       = wr_req_wr;
+  assign rd_req_wr    = !arf_empty && !rd_req_full;
+  assign arf_rd       = rd_req_wr;
+
+  async_fifo #(.WIDTH(REQ_W), .DEPTH(REQ_FIFO_DEPTH)) u_wr_req_fifo (
+    .wr_clk(axi_clk), .wr_rst_n(axi_rst_n), .wr_en(wr_req_wr), .wr_data(wr_req_in), .wr_full(wr_req_full), .wr_almost_full(wr_req_afull),
+    .rd_clk(clk), .rd_rst_n(rst_n), .rd_en(wr_req_rd), .rd_data(wr_req_out), .rd_empty(wr_req_empty));
+
+  async_fifo #(.WIDTH(REQ_W), .DEPTH(REQ_FIFO_DEPTH)) u_rd_req_fifo (
+    .wr_clk(axi_clk), .wr_rst_n(axi_rst_n), .wr_en(rd_req_wr), .wr_data(rd_req_in), .wr_full(rd_req_full), .wr_almost_full(rd_req_afull),
+    .rd_clk(clk), .rd_rst_n(rst_n), .rd_en(rd_req_rd), .rd_data(rd_req_out), .rd_empty(rd_req_empty));
+
+  async_fifo #(.WIDTH(RSP_W), .DEPTH(RSP_FIFO_DEPTH)) u_rsp_fifo (
+    .wr_clk(clk), .wr_rst_n(rst_n), .wr_en(rsp_wr), .wr_data(rsp_in), .wr_full(rsp_full), .wr_almost_full(rsp_afull),
+    .rd_clk(axi_clk), .rd_rst_n(axi_rst_n), .rd_en(rsp_rd), .rd_data(rsp_out), .rd_empty(rsp_empty));
+
+  logic rsp_hold_v;
+  always_ff @(posedge axi_clk or negedge axi_rst_n) begin
+    if (!axi_rst_n) begin
+      rsp_hold_v   <= 1'b0;
+      s_axi_bvalid <= 1'b0;
       s_axi_rvalid <= 1'b0;
       s_axi_bresp  <= 2'b00;
-      s_axi_bvalid <= 1'b0;
+      s_axi_rresp  <= 2'b00;
+      s_axi_rdata  <= '0;
+      s_axi_rlast  <= 1'b0;
     end else begin
-      ddr_cs_n     <= 1'b1;
-      ddr_act_n    <= 1'b1;
-      ddr_ras_n    <= 1'b1;
-      ddr_cas_n    <= 1'b1;
-      ddr_we_n     <= 1'b1;
-      ddr_bg       <= '0;
-      ddr_ba       <= '0;
-      ddr_a        <= '0;
-      ddr_odt      <= 1'b0;
-      ddr_par      <= 1'b0;
-      phy_rd_start <= 1'b0;
-      phy_wr_start <= 1'b0;
+      if (s_axi_bvalid && s_axi_bready) s_axi_bvalid <= 1'b0;
+      if (s_axi_rvalid && s_axi_rready) s_axi_rvalid <= 1'b0;
 
-      if (s_axi_bvalid && s_axi_bready) begin
-        s_axi_bvalid <= 1'b0;
-      end
-
-      if (!init_done) begin
-        unique case (init_state)
-          INIT_RESET: begin
-            ddr_reset_n <= 1'b1;
-            ddr_cke     <= 1'b0;
-            if (init_start) begin
-              init_state <= INIT_WAIT_CKE;
-              wait_cnt   <= 10'd16;
-            end
-          end
-          INIT_WAIT_CKE: begin
-            if (wait_cnt != 0) begin
-              wait_cnt <= wait_cnt - 1'b1;
-            end else begin
-              ddr_cke    <= 1'b1;
-              init_state <= INIT_MR3;
-            end
-          end
-          INIT_MR3: begin
-            ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd3; ddr_bg <= '0; ddr_a <= mr[3];
-            init_state <= INIT_MR6; wait_cnt <= T_MRD_CK[9:0];
-          end
-          INIT_MR6: begin
-            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
-            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd2; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[6]; init_state <= INIT_MR5; wait_cnt <= T_MRD_CK[9:0]; end
-          end
-          INIT_MR5: begin
-            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
-            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd1; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[5]; init_state <= INIT_MR4; wait_cnt <= T_MRD_CK[9:0]; end
-          end
-          INIT_MR4: begin
-            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
-            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd0; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[4]; init_state <= INIT_MR2; wait_cnt <= T_MRD_CK[9:0]; end
-          end
-          INIT_MR2: begin
-            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
-            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd2; ddr_bg <= '0; ddr_a <= mr[2]; init_state <= INIT_MR1; wait_cnt <= T_MRD_CK[9:0]; end
-          end
-          INIT_MR1: begin
-            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
-            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd1; ddr_bg <= '0; ddr_a <= mr[1]; init_state <= INIT_MR0; wait_cnt <= T_MRD_CK[9:0]; end
-          end
-          INIT_MR0: begin
-            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
-            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd0; ddr_bg <= '0; ddr_a <= mr[0]; init_state <= INIT_ZQCL; wait_cnt <= T_MOD_CK[9:0]; end
-          end
-          INIT_ZQCL: begin
-            if (wait_cnt != 0) begin
-              wait_cnt <= wait_cnt - 1'b1;
-            end else begin
-              ddr_cs_n  <= 1'b0;
-              ddr_act_n <= 1'b1;
-              ddr_ras_n <= 1'b0;
-              ddr_cas_n <= 1'b0;
-              ddr_we_n  <= 1'b1;
-              ddr_a     <= 17'h00400;
-              init_state <= INIT_READY;
-            end
-          end
-          INIT_READY: begin
-            init_done <= 1'b1;
-            ddr_cke   <= 1'b1;
-          end
-          default: init_state <= INIT_RESET;
-        endcase
-      end else begin
-        ddr_reset_n <= 1'b1;
-        ddr_cke     <= 1'b1;
-
-        unique case (app_state)
-          APP_IDLE: begin
-            if (s_axi_arvalid) begin
-              rd_base_addr <= s_axi_araddr;
-              rd_cur_addr  <= s_axi_araddr;
-              rd_len       <= s_axi_arlen;
-              rd_idx       <= 8'd0;
-              rd_size      <= s_axi_arsize;
-              rd_burst     <= s_axi_arburst;
-              app_state    <= APP_ACT;
-            end else if (s_axi_awvalid && s_axi_wvalid) begin
-              app_state <= APP_WR_IGNORE;
-            end
-          end
-
-          APP_ACT: begin
-            ddr_cs_n  <= 1'b0;
-            ddr_act_n <= 1'b0;
-            ddr_ras_n <= rd_cur_addr[16];
-            ddr_cas_n <= rd_cur_addr[15];
-            ddr_we_n  <= rd_cur_addr[14];
-            ddr_bg    <= rd_cur_addr[25 +: DDR_BG_W];
-            ddr_ba    <= rd_cur_addr[23 +: DDR_BA_W];
-            ddr_a     <= {2'b00, rd_cur_addr[22:8]};
-            app_wait_cnt <= T_RCD_CK[9:0];
-            app_state <= APP_TRCD;
-          end
-
-          APP_TRCD: begin
-            if (app_wait_cnt != 0) begin
-              app_wait_cnt <= app_wait_cnt - 1'b1;
-            end else begin
-              app_state <= APP_RD_CMD;
-            end
-          end
-
-          APP_RD_CMD: begin
-            ddr_cs_n  <= 1'b0;
-            ddr_act_n <= 1'b1;
-            ddr_ras_n <= 1'b1;
-            ddr_cas_n <= 1'b0;
-            ddr_we_n  <= 1'b1;
-            ddr_bg    <= rd_cur_addr[25 +: DDR_BG_W];
-            ddr_ba    <= rd_cur_addr[23 +: DDR_BA_W];
-            ddr_a     <= '0;
-            ddr_a[9:0] <= rd_cur_addr[11:2];
-            ddr_a[10]  <= 1'b0;
-            ddr_a[12]  <= 1'b1;
-            phy_rd_start <= 1'b1;
-            app_state <= APP_RD_WAIT;
-          end
-
-          APP_RD_WAIT: begin
-            if (phy_rd_valid) begin
-              s_axi_rdata  <= phy_rd_data[AXI_DATA_W-1:0];
-              s_axi_rresp  <= 2'b00;
-              s_axi_rlast  <= (rd_idx == rd_len);
-              s_axi_rvalid <= 1'b1;
-              app_state    <= APP_RD_SEND;
-            end
-          end
-
-          APP_RD_SEND: begin
-            if (s_axi_rvalid && s_axi_rready) begin
-              s_axi_rvalid <= 1'b0;
-              s_axi_rlast  <= 1'b0;
-              if (rd_idx == rd_len) begin
-                app_state <= APP_IDLE;
-              end else begin
-                rd_idx      <= rd_idx + 8'd1;
-                rd_cur_addr <= axi_next_addr(rd_base_addr, rd_cur_addr, rd_len, rd_size, rd_burst);
-                app_state   <= APP_ACT;
-              end
-            end
-          end
-
-          APP_WR_IGNORE: begin
-            s_axi_bresp  <= 2'b00;
-            s_axi_bvalid <= 1'b1;
-            app_state    <= APP_WR_RESP;
-          end
-
-          APP_WR_RESP: begin
-            if (s_axi_bvalid && s_axi_bready) begin
-              s_axi_bvalid <= 1'b0;
-              app_state    <= APP_IDLE;
-            end
-          end
-
-          default: app_state <= APP_IDLE;
-        endcase
+      if (!rsp_hold_v && !rsp_empty) begin
+        rsp_hold   <= rsp_out;
+        rsp_hold_v <= 1'b1;
+      end else if (rsp_hold_v) begin
+        if (rsp_hold.wr && !s_axi_bvalid) begin
+          s_axi_bresp  <= rsp_hold.resp;
+          s_axi_bvalid <= 1'b1;
+          rsp_hold_v   <= 1'b0;
+        end else if (!rsp_hold.wr && !s_axi_rvalid) begin
+          s_axi_rdata  <= rsp_hold.rdata;
+          s_axi_rresp  <= rsp_hold.resp;
+          s_axi_rlast  <= rsp_hold.last;
+          s_axi_rvalid <= 1'b1;
+          rsp_hold_v   <= 1'b0;
+        end
       end
     end
   end
+  assign rsp_rd = !rsp_hold_v && !rsp_empty;
 
-  assign s_axi_arready = init_done && (app_state == APP_IDLE);
-  assign s_axi_awready = init_done && (app_state == APP_IDLE);
-  assign s_axi_wready  = init_done && (app_state == APP_IDLE);
+  // 64-entry direct-mapped cache in the DDR clock domain.
+  ddr_req_t cur_req;
+  logic [AXI_DATA_W-1:0] cache_data [0:CACHE_LINES-1];
+  logic [AXI_ADDR_W-1:CACHE_IDX_W+2] cache_tag [0:CACHE_LINES-1];
+  logic cache_valid [0:CACHE_LINES-1];
+  logic [CACHE_IDX_W-1:0] cur_idx;
+  logic cache_hit;
+  assign cur_idx   = cur_req.addr[CACHE_IDX_W+1:2];
+  assign cache_hit = cache_valid[cur_idx] && (cache_tag[cur_idx] == cur_req.addr[AXI_ADDR_W-1:CACHE_IDX_W+2]);
 
-  ddr4_dq_dqs_phy #(
-    .DQ_W(DDR_DQ_W),
-    .DM_W(DDR_DM_W),
-    .BURST_UI(DDR_BL8_UI),
-    .CL_CK(T_CL_CK),
-    .CWL_CK(T_CWL_CK)
-  ) u_dq_dqs_phy (
-    .clk       (clk),
-    .rst_n     (rst_n),
-    .wr_start  (phy_wr_start),
-    .wr_data   (phy_wr_data),
-    .wr_dm_n   (phy_wr_dm_n),
-    .wr_busy   (phy_wr_busy),
-    .wr_done   (phy_wr_done),
-    .rd_start  (phy_rd_start),
-    .rd_data   (phy_rd_data),
-    .rd_valid  (phy_rd_valid),
-    .rd_busy   (phy_rd_busy),
-    .dq_in     (phy_dq_in),
-    .dq_out    (phy_dq_out),
-    .dq_oe     (phy_dq_oe),
-    .dm_out    (phy_dm_out),
-    .dm_oe     (phy_dm_oe),
-    .dqs_t_out (phy_dqs_t_out),
-    .dqs_c_out (phy_dqs_c_out),
-    .dqs_oe    (phy_dqs_oe)
+  logic [DDR_DQ_W-1:0] dq_out;
+  logic dq_oe;
+  assign ddr_ck_t  = clk;
+  assign ddr_ck_c  = ~clk;
+  assign ddr_dq    = dq_oe ? dq_out : 'z;
+  assign ddr_dqs_t = dq_oe ? {DDR_DM_W{clk}} : 'z;
+  assign ddr_dqs_c = dq_oe ? {DDR_DM_W{~clk}} : 'z;
+  assign ddr_dm_n  = dq_oe ? ~cur_req.wstrb[DDR_DM_W-1:0] : 'z;
+
+  function automatic logic [AXI_ADDR_W-1:0] axi_next_addr(
+    input logic [AXI_ADDR_W-1:0] base,
+    input logic [AXI_ADDR_W-1:0] cur,
+    input logic [7:0] len,
+    input logic [2:0] size,
+    input logic [1:0] burst
   );
+    logic [AXI_ADDR_W-1:0] beat_bytes;
+    logic [AXI_ADDR_W-1:0] wrap_bytes;
+    logic [AXI_ADDR_W-1:0] wrap_mask;
+    logic [AXI_ADDR_W-1:0] next_linear;
+    begin
+      beat_bytes  = {{(AXI_ADDR_W-1){1'b0}}, 1'b1} << size;
+      wrap_bytes  = beat_bytes * ({{(AXI_ADDR_W-8){1'b0}}, len} + {{(AXI_ADDR_W-1){1'b0}}, 1'b1});
+      wrap_mask   = wrap_bytes - {{(AXI_ADDR_W-1){1'b0}}, 1'b1};
+      next_linear = cur + beat_bytes;
+      unique case (burst)
+        2'b00: axi_next_addr = cur;
+        2'b01: axi_next_addr = next_linear;
+        2'b10: axi_next_addr = (base & ~wrap_mask) | (next_linear & wrap_mask);
+        default: axi_next_addr = next_linear;
+      endcase
+    end
+  endfunction
+
+  function automatic [DDR_BG_W-1:0] addr_bg(input logic [AXI_ADDR_W-1:0] a); return a[25 +: DDR_BG_W]; endfunction
+  function automatic [DDR_BA_W-1:0] addr_ba(input logic [AXI_ADDR_W-1:0] a); return a[23 +: DDR_BA_W]; endfunction
+  function automatic [DDR_ROW_W-1:0] addr_row(input logic [AXI_ADDR_W-1:0] a); return a[22:8]; endfunction
+  function automatic [DDR_COL_W-1:0] addr_col(input logic [AXI_ADDR_W-1:0] a); return a[11:2]; endfunction
+
+  task automatic drive_des;
+    begin
+      ddr_cs_n  <= 1'b1;
+      ddr_act_n <= 1'b1;
+      ddr_ras_n <= 1'b1;
+      ddr_cas_n <= 1'b1;
+      ddr_we_n  <= 1'b1;
+    end
+  endtask
+
+  always_comb begin
+    wr_req_rd = 1'b0;
+    rd_req_rd = 1'b0;
+    rsp_wr    = 1'b0;
+    if (state == APP_IDLE && init_done && !rsp_full) begin
+      // Scheduler policy: read cycle priority over write cycle.
+      if (!rd_req_empty) rd_req_rd = 1'b1;
+      else if (!wr_req_empty) wr_req_rd = 1'b1;
+    end
+    if (state == APP_RESP && !rsp_full) rsp_wr = 1'b1;
+  end
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      state       <= INIT_RESET;
+      wait_cnt    <= '0;
+      init_done   <= 1'b0;
+      ddr_reset_n <= 1'b0;
+      ddr_cke     <= 1'b0;
+      ddr_odt     <= 1'b0;
+      ddr_par     <= 1'b0;
+      ddr_cs_n    <= 1'b1;
+      ddr_act_n   <= 1'b1;
+      ddr_ras_n   <= 1'b1;
+      ddr_cas_n   <= 1'b1;
+      ddr_we_n    <= 1'b1;
+      ddr_bg      <= '0;
+      ddr_ba      <= '0;
+      ddr_a       <= '0;
+      dq_out      <= '0;
+      dq_oe       <= 1'b0;
+      cur_req     <= '0;
+      rsp_in      <= '0;
+      for (int i=0; i<CACHE_LINES; i++) begin
+        cache_valid[i] <= 1'b0;
+        cache_data[i]  <= '0;
+        cache_tag[i]   <= '0;
+      end
+    end else begin
+      drive_des();
+      ddr_reset_n <= 1'b1;
+      ddr_cke     <= 1'b1;
+      ddr_odt     <= 1'b1;
+      ddr_par     <= 1'b0;
+      dq_oe       <= 1'b0;
+      if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
+
+      unique case (state)
+        INIT_RESET: begin
+          ddr_reset_n <= 1'b1;
+          ddr_cke     <= 1'b0;
+          if (init_start) begin
+            wait_cnt <= 16'd32;
+            state    <= INIT_WAIT_CKE;
+          end
+        end
+        INIT_WAIT_CKE: begin
+          ddr_cke <= 1'b1;
+          if (wait_cnt == 0) state <= INIT_MR3;
+        end
+        INIT_MR3: begin
+          ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
+          ddr_ba <= 2'd3; ddr_bg <= '0; ddr_a <= mr[3]; wait_cnt <= T_MRD_CK; state <= INIT_MR6;
+        end
+        INIT_MR6: if (wait_cnt == 0) begin
+          ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
+          ddr_ba <= 2'd2; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[6]; wait_cnt <= T_MRD_CK; state <= INIT_MR5;
+        end
+        INIT_MR5: if (wait_cnt == 0) begin
+          ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
+          ddr_ba <= 2'd1; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[5]; wait_cnt <= T_MRD_CK; state <= INIT_MR4;
+        end
+        INIT_MR4: if (wait_cnt == 0) begin
+          ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
+          ddr_ba <= 2'd0; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[4]; wait_cnt <= T_MRD_CK; state <= INIT_MR2;
+        end
+        INIT_MR2: if (wait_cnt == 0) begin
+          ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
+          ddr_ba <= 2'd2; ddr_bg <= '0; ddr_a <= mr[2]; wait_cnt <= T_MRD_CK; state <= INIT_MR1;
+        end
+        INIT_MR1: if (wait_cnt == 0) begin
+          ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
+          ddr_ba <= 2'd1; ddr_bg <= '0; ddr_a <= mr[1]; wait_cnt <= T_MRD_CK; state <= INIT_MR0;
+        end
+        INIT_MR0: if (wait_cnt == 0) begin
+          ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
+          ddr_ba <= 2'd0; ddr_bg <= '0; ddr_a <= mr[0]; wait_cnt <= T_MOD_CK; state <= INIT_ZQCL;
+        end
+        INIT_ZQCL: if (wait_cnt == 0) begin
+          ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b1; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b0;
+          ddr_a <= 17'h00400; wait_cnt <= T_ZQINIT_CK[15:0]; state <= INIT_ZQWAIT;
+        end
+        INIT_ZQWAIT: if (wait_cnt == 0) state <= INIT_READY;
+        INIT_READY: begin init_done <= 1'b1; state <= APP_IDLE; end
+
+        APP_IDLE: begin
+          if (!rsp_full) begin
+            if (!rd_req_empty) begin
+              cur_req <= rd_req_out;
+              state   <= APP_ACT;
+            end else if (!wr_req_empty) begin
+              cur_req <= wr_req_out;
+              state   <= APP_ACT;
+            end
+          end
+        end
+        APP_ACT: begin
+          ddr_cs_n  <= 1'b0;
+          ddr_act_n <= 1'b0;
+          ddr_ras_n <= addr_row(cur_req.addr)[14];
+          ddr_cas_n <= addr_row(cur_req.addr)[13];
+          ddr_we_n  <= addr_row(cur_req.addr)[12];
+          ddr_bg    <= addr_bg(cur_req.addr);
+          ddr_ba    <= addr_ba(cur_req.addr);
+          ddr_a     <= {{(DDR_ADDR_W-DDR_ROW_W){1'b0}}, addr_row(cur_req.addr)};
+          wait_cnt  <= T_RCD_CK;
+          state     <= APP_TRCD;
+        end
+        APP_TRCD: if (wait_cnt == 0) begin
+          if (cur_req.wr) state <= APP_WR;
+          else if (cache_hit) state <= APP_RESP;
+          else state <= APP_RD;
+        end
+        APP_WR: begin
+          ddr_cs_n  <= 1'b0;
+          ddr_act_n <= 1'b1;
+          ddr_ras_n <= 1'b1;
+          ddr_cas_n <= 1'b0;
+          ddr_we_n  <= 1'b0;
+          ddr_bg    <= addr_bg(cur_req.addr);
+          ddr_ba    <= addr_ba(cur_req.addr);
+          ddr_a     <= {{(DDR_ADDR_W-DDR_COL_W){1'b0}}, addr_col(cur_req.addr)};
+          dq_out    <= cur_req.wdata[DDR_DQ_W-1:0];
+          dq_oe     <= 1'b1;
+          cache_data[cur_idx]  <= cur_req.wdata;
+          cache_tag[cur_idx]   <= cur_req.addr[AXI_ADDR_W-1:CACHE_IDX_W+2];
+          cache_valid[cur_idx] <= 1'b1;
+          wait_cnt <= T_CWL_CK;
+          state    <= APP_PRE;
+        end
+        APP_RD: begin
+          ddr_cs_n  <= 1'b0;
+          ddr_act_n <= 1'b1;
+          ddr_ras_n <= 1'b1;
+          ddr_cas_n <= 1'b0;
+          ddr_we_n  <= 1'b1;
+          ddr_bg    <= addr_bg(cur_req.addr);
+          ddr_ba    <= addr_ba(cur_req.addr);
+          ddr_a     <= {{(DDR_ADDR_W-DDR_COL_W){1'b0}}, addr_col(cur_req.addr)};
+          wait_cnt  <= T_CL_CK;
+          state     <= APP_RLAT;
+        end
+        APP_RLAT: if (wait_cnt == 0) begin
+          cache_data[cur_idx]  <= {{(AXI_DATA_W-DDR_DQ_W){1'b0}}, ddr_dq};
+          cache_tag[cur_idx]   <= cur_req.addr[AXI_ADDR_W-1:CACHE_IDX_W+2];
+          cache_valid[cur_idx] <= 1'b1;
+          state <= APP_PRE;
+        end
+        APP_PRE: begin
+          ddr_cs_n  <= 1'b0;
+          ddr_act_n <= 1'b1;
+          ddr_ras_n <= 1'b0;
+          ddr_cas_n <= 1'b1;
+          ddr_we_n  <= 1'b0;
+          ddr_bg    <= addr_bg(cur_req.addr);
+          ddr_ba    <= addr_ba(cur_req.addr);
+          ddr_a     <= '0;
+          ddr_a[10] <= 1'b1;
+          wait_cnt <= T_RP_CK;
+          state    <= APP_TRP;
+        end
+        APP_TRP: if (wait_cnt == 0) state <= APP_RESP;
+        APP_RESP: if (!rsp_full) begin
+          if (cur_req.wr) begin
+            rsp_in <= '{wr:1'b1, addr:cur_req.addr, rdata:'0, resp:2'b00, last:1'b1};
+          end else begin
+            rsp_in <= '{wr:1'b0, addr:cur_req.addr, rdata:cache_data[cur_idx], resp:2'b00, last:1'b1};
+          end
+          state <= APP_IDLE;
+        end
+        default: state <= INIT_RESET;
+      endcase
+    end
+  end
 
 endmodule : ddr4_controller_top
