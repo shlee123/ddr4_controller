@@ -17,6 +17,9 @@ package ddr4_ctrl_pkg;
   parameter int DDR_BG_W   = 2;  // x8 uses BG[1:0]; x16 uses BG0 only
   parameter int DDR_DQ_W   = 16; // default simulation build uses x16
   parameter int DDR_DM_W   = DDR_DQ_W / 8;
+  parameter int DDR_BL8_UI = 8;  // BL8 transfers eight DQ unit intervals
+  parameter int DDR_BURST_DATA_W = DDR_DQ_W * DDR_BL8_UI;
+  parameter int DDR_BURST_DM_W   = DDR_DM_W * DDR_BL8_UI;
 
   // DDR4 command abstraction used inside controller/model.
   typedef enum logic [4:0] {
@@ -70,5 +73,7 @@ package ddr4_ctrl_pkg;
   parameter int T_MRD_CK  = 8;
   parameter int T_MOD_CK  = 24;
   parameter int T_ZQINIT_CK = 512;
+  parameter int T_CL_CK   = 11; // first V2 model CL for read data capture
+  parameter int T_CWL_CK  = 9;  // first V2 model CWL for write data launch
 
 endpackage : ddr4_ctrl_pkg
