@@ -1,59 +1,126 @@
 `timescale 1ns/1ps
 module ddr4_ctrl_tb;
-  import ddr4_pkg::*;
-  logic aclk=0, aresetn=0;
-  logic ddr_clk=0, ddr_resetn=0;
-  always #2.5 aclk = ~aclk;     // 200MHz AXI/APB domain
-  always #1.0 ddr_clk = ~ddr_clk; // 500MHz DRAM/controller domain
+  import ddr4_ctrl_pkg::*;
 
-  logic [31:0] awaddr, wdata, araddr; logic [7:0] awlen, arlen; logic [1:0] awburst, arburst;
-  logic awvalid, awready, wvalid, wready, wlast, bvalid, bready; logic [3:0] wstrb; logic [1:0] bresp;
-  logic arvalid, arready, rvalid, rready, rlast; logic [31:0] rdata; logic [1:0] rresp;
-  logic psel,penable,pwrite; logic [31:0] paddr,pwdata,prdata; logic pready,pslverr;
-  logic reset_n,ck_t,ck_c,cke,cs_n,act_n,ras_n,cas_n,we_n,odt,alert_n; logic [16:0] a; logic [1:0] ba,bg; wire [15:0] dq; wire [1:0] dqs_t,dqs_c; logic [1:0] dm_n;
+  logic axi_clk=0, axi_rst_n=0;
+  logic clk=0, rst_n=0;
+  always #2.5 axi_clk = ~axi_clk; // 200 MHz AXI/APB domain
+  always #1.0 clk     = ~clk;     // 500 MHz DDR domain
 
-  ddr4_ctrl_top dut(.*,
-    .s_axi_awaddr(awaddr),.s_axi_awlen(awlen),.s_axi_awburst(awburst),.s_axi_awvalid(awvalid),.s_axi_awready(awready),
-    .s_axi_wdata(wdata),.s_axi_wstrb(wstrb),.s_axi_wlast(wlast),.s_axi_wvalid(wvalid),.s_axi_wready(wready),.s_axi_bresp(bresp),.s_axi_bvalid(bvalid),.s_axi_bready(bready),
-    .s_axi_araddr(araddr),.s_axi_arlen(arlen),.s_axi_arburst(arburst),.s_axi_arvalid(arvalid),.s_axi_arready(arready),.s_axi_rdata(rdata),.s_axi_rresp(rresp),.s_axi_rlast(rlast),.s_axi_rvalid(rvalid),.s_axi_rready(rready),
-    .ddr4_reset_n(reset_n),.ddr4_ck_t(ck_t),.ddr4_ck_c(ck_c),.ddr4_cke(cke),.ddr4_cs_n(cs_n),.ddr4_act_n(act_n),.ddr4_ras_n(ras_n),.ddr4_cas_n(cas_n),.ddr4_we_n(we_n),.ddr4_a(a),.ddr4_ba(ba),.ddr4_bg(bg),.ddr4_odt(odt),.ddr4_dq(dq),.ddr4_dqs_t(dqs_t),.ddr4_dqs_c(dqs_c),.ddr4_dm_n(dm_n),.ddr4_alert_n(alert_n));
+  logic [31:0] s_axi_awaddr, s_axi_wdata, s_axi_araddr;
+  logic [7:0]  s_axi_awlen, s_axi_arlen;
+  logic [2:0]  s_axi_awsize, s_axi_arsize;
+  logic [1:0]  s_axi_awburst, s_axi_arburst;
+  logic        s_axi_awvalid, s_axi_awready;
+  logic        s_axi_wvalid, s_axi_wready, s_axi_wlast;
+  logic [3:0]  s_axi_wstrb;
+  logic [1:0]  s_axi_bresp;
+  logic        s_axi_bvalid, s_axi_bready;
+  logic        s_axi_arvalid, s_axi_arready;
+  logic [31:0] s_axi_rdata;
+  logic [1:0]  s_axi_rresp;
+  logic        s_axi_rvalid, s_axi_rready, s_axi_rlast;
 
-  ddr4_sdram_model u_mem(.reset_n(reset_n),.ck_t(ck_t),.ck_c(ck_c),.cke(cke),.cs_n(cs_n),.act_n(act_n),.ras_n(ras_n),.cas_n(cas_n),.we_n(we_n),.a(a),.ba(ba),.bg(bg),.odt(odt),.dq(dq),.dqs_t(dqs_t),.dqs_c(dqs_c),.dm_n(dm_n),.alert_n(alert_n));
+  logic [31:0] paddr, pwdata, prdata;
+  logic psel, penable, pwrite, pready, pslverr;
 
-  task automatic axi_write(input logic [31:0] addr,input logic [31:0] data);
+  logic ddr_reset_n, ddr_ck_t, ddr_ck_c, ddr_cke, ddr_cs_n, ddr_act_n;
+  logic ddr_ras_n, ddr_cas_n, ddr_we_n, ddr_odt, ddr_par, ddr_alert_n;
+  logic [16:0] ddr_a;
+  logic [1:0]  ddr_ba, ddr_bg;
+  wire  [15:0] ddr_dq;
+  wire  [1:0]  ddr_dqs_t, ddr_dqs_c, ddr_dm_n;
+
+  ddr4_controller_top dut (
+    .axi_clk(axi_clk), .axi_rst_n(axi_rst_n), .clk(clk), .rst_n(rst_n),
+    .s_axi_awaddr(s_axi_awaddr), .s_axi_awlen(s_axi_awlen), .s_axi_awsize(s_axi_awsize), .s_axi_awburst(s_axi_awburst), .s_axi_awvalid(s_axi_awvalid), .s_axi_awready(s_axi_awready),
+    .s_axi_wdata(s_axi_wdata), .s_axi_wstrb(s_axi_wstrb), .s_axi_wlast(s_axi_wlast), .s_axi_wvalid(s_axi_wvalid), .s_axi_wready(s_axi_wready),
+    .s_axi_bresp(s_axi_bresp), .s_axi_bvalid(s_axi_bvalid), .s_axi_bready(s_axi_bready),
+    .s_axi_araddr(s_axi_araddr), .s_axi_arlen(s_axi_arlen), .s_axi_arsize(s_axi_arsize), .s_axi_arburst(s_axi_arburst), .s_axi_arvalid(s_axi_arvalid), .s_axi_arready(s_axi_arready),
+    .s_axi_rdata(s_axi_rdata), .s_axi_rresp(s_axi_rresp), .s_axi_rlast(s_axi_rlast), .s_axi_rvalid(s_axi_rvalid), .s_axi_rready(s_axi_rready),
+    .paddr(paddr), .psel(psel), .penable(penable), .pwrite(pwrite), .pwdata(pwdata), .prdata(prdata), .pready(pready), .pslverr(pslverr),
+    .ddr_ck_t(ddr_ck_t), .ddr_ck_c(ddr_ck_c), .ddr_reset_n(ddr_reset_n), .ddr_cke(ddr_cke), .ddr_cs_n(ddr_cs_n), .ddr_act_n(ddr_act_n),
+    .ddr_ras_n(ddr_ras_n), .ddr_cas_n(ddr_cas_n), .ddr_we_n(ddr_we_n), .ddr_bg(ddr_bg), .ddr_ba(ddr_ba), .ddr_a(ddr_a),
+    .ddr_odt(ddr_odt), .ddr_par(ddr_par), .ddr_alert_n(ddr_alert_n), .ddr_dq(ddr_dq), .ddr_dqs_t(ddr_dqs_t), .ddr_dqs_c(ddr_dqs_c), .ddr_dm_n(ddr_dm_n)
+  );
+
+  ddr4_sdram_model u_mem (
+    .reset_n(ddr_reset_n), .ck_t(ddr_ck_t), .ck_c(ddr_ck_c), .cke(ddr_cke), .cs_n(ddr_cs_n), .act_n(ddr_act_n),
+    .ras_n(ddr_ras_n), .cas_n(ddr_cas_n), .we_n(ddr_we_n), .a(ddr_a), .ba(ddr_ba), .bg(ddr_bg), .odt(ddr_odt),
+    .dq(ddr_dq), .dqs_t(ddr_dqs_t), .dqs_c(ddr_dqs_c), .dm_n(ddr_dm_n), .alert_n(ddr_alert_n)
+  );
+
+  task automatic axi_write(input logic [31:0] addr, input logic [31:0] data);
     begin
-      @(posedge aclk); awaddr<=addr; awlen<=0; awburst<=1; awvalid<=1; wdata<=data; wstrb<=4'hf; wlast<=1; wvalid<=1; bready<=1;
-      while(!(awready && wready)) @(posedge aclk);
-      @(posedge aclk); awvalid<=0; wvalid<=0;
-      while(!bvalid) @(posedge aclk);
-      @(posedge aclk); bready<=0;
+      @(posedge axi_clk);
+      s_axi_awaddr  <= addr;
+      s_axi_awlen   <= 8'd0;
+      s_axi_awsize  <= 3'd2;
+      s_axi_awburst <= 2'b01;
+      s_axi_awvalid <= 1'b1;
+      s_axi_wdata   <= data;
+      s_axi_wstrb   <= 4'hf;
+      s_axi_wlast   <= 1'b1;
+      s_axi_wvalid  <= 1'b1;
+      s_axi_bready  <= 1'b1;
+      while (!(s_axi_awready && s_axi_wready)) @(posedge axi_clk);
+      @(posedge axi_clk);
+      s_axi_awvalid <= 1'b0;
+      s_axi_wvalid  <= 1'b0;
+      while (!s_axi_bvalid) @(posedge axi_clk);
+      @(posedge axi_clk);
+      s_axi_bready <= 1'b0;
     end
   endtask
+
   task automatic axi_read(input logic [31:0] addr, output logic [31:0] data);
     begin
-      @(posedge aclk); araddr<=addr; arlen<=0; arburst<=1; arvalid<=1; rready<=1;
-      while(!arready) @(posedge aclk);
-      @(posedge aclk); arvalid<=0;
-      while(!rvalid) @(posedge aclk);
-      data=rdata; @(posedge aclk); rready<=0;
+      @(posedge axi_clk);
+      s_axi_araddr  <= addr;
+      s_axi_arlen   <= 8'd0;
+      s_axi_arsize  <= 3'd2;
+      s_axi_arburst <= 2'b01;
+      s_axi_arvalid <= 1'b1;
+      s_axi_rready  <= 1'b1;
+      while (!s_axi_arready) @(posedge axi_clk);
+      @(posedge axi_clk);
+      s_axi_arvalid <= 1'b0;
+      while (!s_axi_rvalid) @(posedge axi_clk);
+      data = s_axi_rdata;
+      @(posedge axi_clk);
+      s_axi_rready <= 1'b0;
     end
   endtask
 
-  int errors=0;
+  int errors = 0;
   initial begin
     $fsdbDumpfile("ddr4_ctrl_v2_1.fsdb");
     $fsdbDumpvars(0, ddr4_ctrl_tb);
-    awaddr=0;awlen=0;awburst=0;awvalid=0;wdata=0;wstrb=0;wlast=0;wvalid=0;bready=0;araddr=0;arlen=0;arburst=0;arvalid=0;rready=0;
-    psel=0;penable=0;pwrite=0;paddr=0;pwdata=0;
-    repeat(10) @(posedge aclk); aresetn=1;
-    repeat(5) @(posedge ddr_clk); ddr_resetn=1;
-    repeat(200) @(posedge aclk);
+
+    s_axi_awaddr=0; s_axi_awlen=0; s_axi_awsize=0; s_axi_awburst=0; s_axi_awvalid=0;
+    s_axi_wdata=0; s_axi_wstrb=0; s_axi_wlast=0; s_axi_wvalid=0; s_axi_bready=0;
+    s_axi_araddr=0; s_axi_arlen=0; s_axi_arsize=0; s_axi_arburst=0; s_axi_arvalid=0; s_axi_rready=0;
+    psel=0; penable=0; pwrite=0; paddr=0; pwdata=0;
+
+    repeat(10) @(posedge axi_clk); axi_rst_n = 1'b1;
+    repeat(10) @(posedge clk);     rst_n     = 1'b1;
+    repeat(800) @(posedge axi_clk);
+
     for(int i=0;i<64;i++) begin
-      logic [31:0] addr,wd,rd; addr = {$urandom}%4096; addr[1:0]=2'b00; wd=$urandom;
-      axi_write(addr,wd); axi_read(addr,rd);
-      if(rd !== wd) begin $display("ERROR addr=%08x wr=%08x rd=%08x",addr,wd,rd); errors++; end
+      logic [31:0] addr, wd, rd;
+      addr = {$urandom}%4096;
+      addr[1:0] = 2'b00;
+      wd = $urandom;
+      axi_write(addr, wd);
+      axi_read(addr, rd);
+      if (rd !== wd) begin
+        $display("ERROR addr=%08x wr=%08x rd=%08x", addr, wd, rd);
+        errors++;
+      end
     end
-    if(errors==0) $display("DDR4_CTRL_V2_1_RANDOM_TEST_PASS"); else $display("DDR4_CTRL_V2_1_RANDOM_TEST_FAIL errors=%0d",errors);
+
+    if(errors == 0) $display("DDR4_CONTROLLER_TOP_V2_1_RANDOM_TEST_PASS");
+    else            $display("DDR4_CONTROLLER_TOP_V2_1_RANDOM_TEST_FAIL errors=%0d", errors);
     #100 $finish;
   end
 endmodule
