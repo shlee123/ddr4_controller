@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // DDR4 controller top-level, Version 2.
-// Adds controller-side DQ/DQS burst-data support through ddr4_dq_dqs_phy.
+// Synthesis-oriented RTL skeleton with AXI burst-read support and DDR4 BL8 DQ/DQS PHY shim.
 
 import ddr4_ctrl_pkg::*;
 
@@ -107,16 +107,16 @@ module ddr4_controller_top #(
     APP_IDLE,
     APP_ACT,
     APP_TRCD,
-    APP_WR_CMD,
-    APP_WR_DATA,
-    APP_WR_RESP,
     APP_RD_CMD,
-    APP_RD_DATA,
-    APP_RD_RESP
+    APP_RD_WAIT,
+    APP_RD_SEND,
+    APP_WR_IGNORE,
+    APP_WR_RESP
   } app_state_e;
 
   init_state_e init_state;
   app_state_e  app_state;
+
   logic        init_start;
   logic        init_done;
   logic [16:0] mr [0:6];
@@ -124,47 +124,71 @@ module ddr4_controller_top #(
   logic [9:0]  app_wait_cnt;
   logic        apb_wr;
   logic        apb_rd;
-  logic        app_is_write;
-  logic [AXI_ADDR_W-1:0] app_addr;
-  logic [AXI_DATA_W-1:0] app_wdata;
-  logic [AXI_DATA_W/8-1:0] app_wstrb;
+
+  logic [AXI_ADDR_W-1:0] rd_base_addr;
+  logic [AXI_ADDR_W-1:0] rd_cur_addr;
+  logic [7:0]            rd_len;
+  logic [7:0]            rd_idx;
+  logic [2:0]            rd_size;
+  logic [1:0]            rd_burst;
+
+  logic phy_rd_start;
+  logic phy_rd_busy;
+  logic phy_rd_valid;
+  logic [DDR_DQ_W*DDR_BL8_UI-1:0] phy_rd_data;
 
   logic phy_wr_start;
   logic phy_wr_busy;
   logic phy_wr_done;
   logic [DDR_DQ_W*DDR_BL8_UI-1:0] phy_wr_data;
   logic [DDR_DM_W*DDR_BL8_UI-1:0] phy_wr_dm_n;
-  logic phy_rd_start;
-  logic phy_rd_busy;
-  logic phy_rd_valid;
-  logic [DDR_DQ_W*DDR_BL8_UI-1:0] phy_rd_data;
 
-  assign ddr_ck_t = clk;
-  assign ddr_ck_c = ~clk;
-  assign apb_wr   = psel & penable & pwrite;
-  assign apb_rd   = psel & penable & ~pwrite;
-  assign pready   = psel & penable;
-  assign pslverr  = 1'b0;
+  logic [DDR_DQ_W-1:0] phy_dq_in;
+  logic [DDR_DQ_W-1:0] phy_dq_out;
+  logic                phy_dq_oe;
+  logic [DDR_DM_W-1:0] phy_dm_out;
+  logic                phy_dm_oe;
+  logic [DDR_DM_W-1:0] phy_dqs_t_out;
+  logic [DDR_DM_W-1:0] phy_dqs_c_out;
+  logic                phy_dqs_oe;
 
-  function automatic logic [DDR_DQ_W*DDR_BL8_UI-1:0] expand_axi_to_bl8(input logic [AXI_DATA_W-1:0] data);
-    logic [DDR_DQ_W*DDR_BL8_UI-1:0] tmp;
+  assign ddr_ck_t  = clk;
+  assign ddr_ck_c  = ~clk;
+  assign apb_wr    = psel & penable & pwrite;
+  assign apb_rd    = psel & penable & ~pwrite;
+  assign pready    = psel & penable;
+  assign pslverr   = 1'b0;
+  assign phy_dq_in = ddr_dq;
+
+  // Top-level tri-state mapping.  In ASIC/FPGA implementation, replace this boundary
+  // with technology I/O cells.  Internal RTL uses explicit data/OE signals.
+  assign ddr_dq    = phy_dq_oe  ? phy_dq_out    : 'z;
+  assign ddr_dm_n  = phy_dm_oe  ? phy_dm_out    : 'z;
+  assign ddr_dqs_t = phy_dqs_oe ? phy_dqs_t_out : 'z;
+  assign ddr_dqs_c = phy_dqs_oe ? phy_dqs_c_out : 'z;
+
+  function automatic logic [AXI_ADDR_W-1:0] axi_next_addr(
+    input logic [AXI_ADDR_W-1:0] base,
+    input logic [AXI_ADDR_W-1:0] cur,
+    input logic [7:0] len,
+    input logic [2:0] size,
+    input logic [1:0] burst
+  );
+    logic [AXI_ADDR_W-1:0] beat_bytes;
+    logic [AXI_ADDR_W-1:0] wrap_bytes;
+    logic [AXI_ADDR_W-1:0] wrap_mask;
+    logic [AXI_ADDR_W-1:0] next_linear;
     begin
-      tmp = '0;
-      for (int i = 0; i < DDR_BL8_UI; i++) begin
-        tmp[i*DDR_DQ_W +: DDR_DQ_W] = data[(i % (AXI_DATA_W/DDR_DQ_W))*DDR_DQ_W +: DDR_DQ_W];
-      end
-      return tmp;
-    end
-  endfunction
-
-  function automatic logic [DDR_DM_W*DDR_BL8_UI-1:0] expand_strb_to_dm_n(input logic [AXI_DATA_W/8-1:0] strb);
-    logic [DDR_DM_W*DDR_BL8_UI-1:0] tmp;
-    begin
-      tmp = '1;
-      for (int i = 0; i < DDR_BL8_UI; i++) begin
-        tmp[i*DDR_DM_W +: DDR_DM_W] = ~strb[(i % (AXI_DATA_W/8/DDR_DM_W))*DDR_DM_W +: DDR_DM_W];
-      end
-      return tmp;
+      beat_bytes  = {{(AXI_ADDR_W-1){1'b0}}, 1'b1} << size;
+      wrap_bytes  = beat_bytes * ({{(AXI_ADDR_W-8){1'b0}}, len} + {{(AXI_ADDR_W-1){1'b0}}, 1'b1});
+      wrap_mask   = wrap_bytes - {{(AXI_ADDR_W-1){1'b0}}, 1'b1};
+      next_linear = cur + beat_bytes;
+      unique case (burst)
+        2'b00: axi_next_addr = cur; // FIXED
+        2'b01: axi_next_addr = next_linear; // INCR
+        2'b10: axi_next_addr = (base & ~wrap_mask) | (next_linear & wrap_mask); // WRAP
+        default: axi_next_addr = next_linear;
+      endcase
     end
   endfunction
 
@@ -211,74 +235,6 @@ module ddr4_controller_top #(
     end
   end
 
-  task automatic drive_des;
-    begin
-      ddr_cs_n  <= 1'b1;
-      ddr_act_n <= 1'b1;
-      ddr_ras_n <= 1'b1;
-      ddr_cas_n <= 1'b1;
-      ddr_we_n  <= 1'b1;
-      ddr_a     <= '0;
-      ddr_ba    <= '0;
-      ddr_bg    <= '0;
-    end
-  endtask
-
-  task automatic drive_mrs(input logic [2:0] mr_idx, input logic [16:0] value);
-    begin
-      ddr_cs_n  <= 1'b0;
-      ddr_act_n <= 1'b1;
-      ddr_ras_n <= 1'b0;
-      ddr_cas_n <= 1'b1;
-      ddr_we_n  <= 1'b1;
-      ddr_ba    <= mr_idx[1:0];
-      ddr_bg    <= {{(DDR_BG_W-1){1'b0}}, mr_idx[2]};
-      ddr_a     <= value;
-    end
-  endtask
-
-  task automatic drive_zqcl;
-    begin
-      ddr_cs_n  <= 1'b0;
-      ddr_act_n <= 1'b1;
-      ddr_ras_n <= 1'b0;
-      ddr_cas_n <= 1'b0;
-      ddr_we_n  <= 1'b1;
-      ddr_a     <= 17'h00400;
-      ddr_ba    <= '0;
-      ddr_bg    <= '0;
-    end
-  endtask
-
-  task automatic drive_act(input logic [AXI_ADDR_W-1:0] addr);
-    begin
-      ddr_cs_n  <= 1'b0;
-      ddr_act_n <= 1'b0;
-      ddr_ras_n <= addr[16];
-      ddr_cas_n <= addr[15];
-      ddr_we_n  <= addr[14];
-      ddr_bg    <= addr[25 +: DDR_BG_W];
-      ddr_ba    <= addr[23 +: DDR_BA_W];
-      ddr_a     <= {2'b00, addr[22:8]};
-    end
-  endtask
-
-  task automatic drive_rdwr(input logic [AXI_ADDR_W-1:0] addr, input logic is_write);
-    begin
-      ddr_cs_n  <= 1'b0;
-      ddr_act_n <= 1'b1;
-      ddr_ras_n <= 1'b1;
-      ddr_cas_n <= 1'b0;
-      ddr_we_n  <= is_write ? 1'b0 : 1'b1;
-      ddr_bg    <= addr[25 +: DDR_BG_W];
-      ddr_ba    <= addr[23 +: DDR_BA_W];
-      ddr_a     <= '0;
-      ddr_a[9:0] <= addr[11:2];
-      ddr_a[10]  <= 1'b0; // no auto-precharge in V2 simple path
-      ddr_a[12]  <= 1'b1; // no burst chop: BL8
-    end
-  endtask
-
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       init_state   <= INIT_RESET;
@@ -290,32 +246,46 @@ module ddr4_controller_top #(
       ddr_cke      <= 1'b0;
       ddr_odt      <= 1'b0;
       ddr_par      <= 1'b0;
-      phy_wr_start <= 1'b0;
+      ddr_cs_n     <= 1'b1;
+      ddr_act_n    <= 1'b1;
+      ddr_ras_n    <= 1'b1;
+      ddr_cas_n    <= 1'b1;
+      ddr_we_n     <= 1'b1;
+      ddr_bg       <= '0;
+      ddr_ba       <= '0;
+      ddr_a        <= '0;
+      rd_base_addr <= '0;
+      rd_cur_addr  <= '0;
+      rd_len       <= '0;
+      rd_idx       <= '0;
+      rd_size      <= '0;
+      rd_burst     <= '0;
       phy_rd_start <= 1'b0;
-      s_axi_bvalid <= 1'b0;
-      s_axi_rvalid <= 1'b0;
+      phy_wr_start <= 1'b0;
+      phy_wr_data  <= '0;
+      phy_wr_dm_n  <= '1;
       s_axi_rdata  <= '0;
       s_axi_rresp  <= 2'b00;
-      s_axi_bresp  <= 2'b00;
       s_axi_rlast  <= 1'b0;
-      app_addr     <= '0;
-      app_wdata    <= '0;
-      app_wstrb    <= '0;
-      app_is_write <= 1'b0;
-      drive_des();
+      s_axi_rvalid <= 1'b0;
+      s_axi_bresp  <= 2'b00;
+      s_axi_bvalid <= 1'b0;
     end else begin
-      drive_des();
+      ddr_cs_n     <= 1'b1;
+      ddr_act_n    <= 1'b1;
+      ddr_ras_n    <= 1'b1;
+      ddr_cas_n    <= 1'b1;
+      ddr_we_n     <= 1'b1;
+      ddr_bg       <= '0;
+      ddr_ba       <= '0;
+      ddr_a        <= '0;
       ddr_odt      <= 1'b0;
       ddr_par      <= 1'b0;
-      phy_wr_start <= 1'b0;
       phy_rd_start <= 1'b0;
+      phy_wr_start <= 1'b0;
 
       if (s_axi_bvalid && s_axi_bready) begin
         s_axi_bvalid <= 1'b0;
-      end
-      if (s_axi_rvalid && s_axi_rready) begin
-        s_axi_rvalid <= 1'b0;
-        s_axi_rlast  <= 1'b0;
       end
 
       if (!init_done) begin
@@ -329,89 +299,162 @@ module ddr4_controller_top #(
             end
           end
           INIT_WAIT_CKE: begin
-            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
-            else begin
+            if (wait_cnt != 0) begin
+              wait_cnt <= wait_cnt - 1'b1;
+            end else begin
               ddr_cke    <= 1'b1;
               init_state <= INIT_MR3;
             end
           end
-          INIT_MR3:  begin drive_mrs(3'd3, mr[3]); init_state <= INIT_MR6;  wait_cnt <= T_MRD_CK[9:0]; end
-          INIT_MR6:  begin if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1; else begin drive_mrs(3'd6, mr[6]); init_state <= INIT_MR5; wait_cnt <= T_MRD_CK[9:0]; end end
-          INIT_MR5:  begin if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1; else begin drive_mrs(3'd5, mr[5]); init_state <= INIT_MR4; wait_cnt <= T_MRD_CK[9:0]; end end
-          INIT_MR4:  begin if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1; else begin drive_mrs(3'd4, mr[4]); init_state <= INIT_MR2; wait_cnt <= T_MRD_CK[9:0]; end end
-          INIT_MR2:  begin if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1; else begin drive_mrs(3'd2, mr[2]); init_state <= INIT_MR1; wait_cnt <= T_MRD_CK[9:0]; end end
-          INIT_MR1:  begin if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1; else begin drive_mrs(3'd1, mr[1]); init_state <= INIT_MR0; wait_cnt <= T_MRD_CK[9:0]; end end
-          INIT_MR0:  begin if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1; else begin drive_mrs(3'd0, mr[0]); init_state <= INIT_ZQCL; wait_cnt <= T_MOD_CK[9:0]; end end
-          INIT_ZQCL: begin if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1; else begin drive_zqcl(); init_state <= INIT_READY; end end
-          INIT_READY: begin init_done <= 1'b1; ddr_cke <= 1'b1; end
+          INIT_MR3: begin
+            ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd3; ddr_bg <= '0; ddr_a <= mr[3];
+            init_state <= INIT_MR6; wait_cnt <= T_MRD_CK[9:0];
+          end
+          INIT_MR6: begin
+            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
+            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd2; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[6]; init_state <= INIT_MR5; wait_cnt <= T_MRD_CK[9:0]; end
+          end
+          INIT_MR5: begin
+            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
+            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd1; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[5]; init_state <= INIT_MR4; wait_cnt <= T_MRD_CK[9:0]; end
+          end
+          INIT_MR4: begin
+            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
+            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd0; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[4]; init_state <= INIT_MR2; wait_cnt <= T_MRD_CK[9:0]; end
+          end
+          INIT_MR2: begin
+            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
+            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd2; ddr_bg <= '0; ddr_a <= mr[2]; init_state <= INIT_MR1; wait_cnt <= T_MRD_CK[9:0]; end
+          end
+          INIT_MR1: begin
+            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
+            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd1; ddr_bg <= '0; ddr_a <= mr[1]; init_state <= INIT_MR0; wait_cnt <= T_MRD_CK[9:0]; end
+          end
+          INIT_MR0: begin
+            if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
+            else begin ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b1; ddr_ba <= 2'd0; ddr_bg <= '0; ddr_a <= mr[0]; init_state <= INIT_ZQCL; wait_cnt <= T_MOD_CK[9:0]; end
+          end
+          INIT_ZQCL: begin
+            if (wait_cnt != 0) begin
+              wait_cnt <= wait_cnt - 1'b1;
+            end else begin
+              ddr_cs_n  <= 1'b0;
+              ddr_act_n <= 1'b1;
+              ddr_ras_n <= 1'b0;
+              ddr_cas_n <= 1'b0;
+              ddr_we_n  <= 1'b1;
+              ddr_a     <= 17'h00400;
+              init_state <= INIT_READY;
+            end
+          end
+          INIT_READY: begin
+            init_done <= 1'b1;
+            ddr_cke   <= 1'b1;
+          end
           default: init_state <= INIT_RESET;
         endcase
       end else begin
-        ddr_cke <= 1'b1;
+        ddr_reset_n <= 1'b1;
+        ddr_cke     <= 1'b1;
+
         unique case (app_state)
           APP_IDLE: begin
-            if (s_axi_awvalid && s_axi_wvalid) begin
-              app_addr     <= s_axi_awaddr;
-              app_wdata    <= s_axi_wdata;
-              app_wstrb    <= s_axi_wstrb;
-              app_is_write <= 1'b1;
+            if (s_axi_arvalid) begin
+              rd_base_addr <= s_axi_araddr;
+              rd_cur_addr  <= s_axi_araddr;
+              rd_len       <= s_axi_arlen;
+              rd_idx       <= 8'd0;
+              rd_size      <= s_axi_arsize;
+              rd_burst     <= s_axi_arburst;
               app_state    <= APP_ACT;
-            end else if (s_axi_arvalid) begin
-              app_addr     <= s_axi_araddr;
-              app_is_write <= 1'b0;
-              app_state    <= APP_ACT;
+            end else if (s_axi_awvalid && s_axi_wvalid) begin
+              app_state <= APP_WR_IGNORE;
             end
           end
+
           APP_ACT: begin
-            drive_act(app_addr);
+            ddr_cs_n  <= 1'b0;
+            ddr_act_n <= 1'b0;
+            ddr_ras_n <= rd_cur_addr[16];
+            ddr_cas_n <= rd_cur_addr[15];
+            ddr_we_n  <= rd_cur_addr[14];
+            ddr_bg    <= rd_cur_addr[25 +: DDR_BG_W];
+            ddr_ba    <= rd_cur_addr[23 +: DDR_BA_W];
+            ddr_a     <= {2'b00, rd_cur_addr[22:8]};
             app_wait_cnt <= T_RCD_CK[9:0];
             app_state <= APP_TRCD;
           end
+
           APP_TRCD: begin
-            if (app_wait_cnt != 0) app_wait_cnt <= app_wait_cnt - 1'b1;
-            else app_state <= app_is_write ? APP_WR_CMD : APP_RD_CMD;
+            if (app_wait_cnt != 0) begin
+              app_wait_cnt <= app_wait_cnt - 1'b1;
+            end else begin
+              app_state <= APP_RD_CMD;
+            end
           end
-          APP_WR_CMD: begin
-            drive_rdwr(app_addr, 1'b1);
-            phy_wr_data  <= expand_axi_to_bl8(app_wdata);
-            phy_wr_dm_n  <= expand_strb_to_dm_n(app_wstrb);
-            phy_wr_start <= 1'b1;
-            app_state    <= APP_WR_DATA;
-          end
-          APP_WR_DATA: begin
-            if (phy_wr_done) app_state <= APP_WR_RESP;
-          end
-          APP_WR_RESP: begin
-            s_axi_bvalid <= 1'b1;
-            s_axi_bresp  <= 2'b00;
-            if (s_axi_bready) app_state <= APP_IDLE;
-          end
+
           APP_RD_CMD: begin
-            drive_rdwr(app_addr, 1'b0);
+            ddr_cs_n  <= 1'b0;
+            ddr_act_n <= 1'b1;
+            ddr_ras_n <= 1'b1;
+            ddr_cas_n <= 1'b0;
+            ddr_we_n  <= 1'b1;
+            ddr_bg    <= rd_cur_addr[25 +: DDR_BG_W];
+            ddr_ba    <= rd_cur_addr[23 +: DDR_BA_W];
+            ddr_a     <= '0;
+            ddr_a[9:0] <= rd_cur_addr[11:2];
+            ddr_a[10]  <= 1'b0;
+            ddr_a[12]  <= 1'b1;
             phy_rd_start <= 1'b1;
-            app_state    <= APP_RD_DATA;
+            app_state <= APP_RD_WAIT;
           end
-          APP_RD_DATA: begin
+
+          APP_RD_WAIT: begin
             if (phy_rd_valid) begin
               s_axi_rdata  <= phy_rd_data[AXI_DATA_W-1:0];
               s_axi_rresp  <= 2'b00;
-              s_axi_rlast  <= 1'b1;
+              s_axi_rlast  <= (rd_idx == rd_len);
               s_axi_rvalid <= 1'b1;
-              app_state    <= APP_RD_RESP;
+              app_state    <= APP_RD_SEND;
             end
           end
-          APP_RD_RESP: begin
-            if (s_axi_rvalid && s_axi_rready) app_state <= APP_IDLE;
+
+          APP_RD_SEND: begin
+            if (s_axi_rvalid && s_axi_rready) begin
+              s_axi_rvalid <= 1'b0;
+              s_axi_rlast  <= 1'b0;
+              if (rd_idx == rd_len) begin
+                app_state <= APP_IDLE;
+              end else begin
+                rd_idx      <= rd_idx + 8'd1;
+                rd_cur_addr <= axi_next_addr(rd_base_addr, rd_cur_addr, rd_len, rd_size, rd_burst);
+                app_state   <= APP_ACT;
+              end
+            end
           end
+
+          APP_WR_IGNORE: begin
+            s_axi_bresp  <= 2'b00;
+            s_axi_bvalid <= 1'b1;
+            app_state    <= APP_WR_RESP;
+          end
+
+          APP_WR_RESP: begin
+            if (s_axi_bvalid && s_axi_bready) begin
+              s_axi_bvalid <= 1'b0;
+              app_state    <= APP_IDLE;
+            end
+          end
+
           default: app_state <= APP_IDLE;
         endcase
       end
     end
   end
 
+  assign s_axi_arready = init_done && (app_state == APP_IDLE);
   assign s_axi_awready = init_done && (app_state == APP_IDLE);
   assign s_axi_wready  = init_done && (app_state == APP_IDLE);
-  assign s_axi_arready = init_done && (app_state == APP_IDLE);
 
   ddr4_dq_dqs_phy #(
     .DQ_W(DDR_DQ_W),
@@ -431,10 +474,14 @@ module ddr4_controller_top #(
     .rd_data   (phy_rd_data),
     .rd_valid  (phy_rd_valid),
     .rd_busy   (phy_rd_busy),
-    .ddr_dq    (ddr_dq),
-    .ddr_dqs_t (ddr_dqs_t),
-    .ddr_dqs_c (ddr_dqs_c),
-    .ddr_dm_n  (ddr_dm_n)
+    .dq_in     (phy_dq_in),
+    .dq_out    (phy_dq_out),
+    .dq_oe     (phy_dq_oe),
+    .dm_out    (phy_dm_out),
+    .dm_oe     (phy_dm_oe),
+    .dqs_t_out (phy_dqs_t_out),
+    .dqs_c_out (phy_dqs_c_out),
+    .dqs_oe    (phy_dqs_oe)
   );
 
 endmodule : ddr4_controller_top
