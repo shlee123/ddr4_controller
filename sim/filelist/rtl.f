@@ -8,3 +8,6 @@
 ../../rtl/phy/ddr4_ck_out.sv
 ../../rtl/phy/ddr4_dq_dqs_phy.sv
 ../../rtl/ddr4_controller_top.sv
+../../rtl/platform/ddr4_clock_manager.sv
+../../rtl/platform/ddr4_mps3_native_top.sv
+../../rtl/platform/ddr4_mps3_mig_platform.sv
