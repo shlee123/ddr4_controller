@@ -88,7 +88,7 @@ module ddr4_sdram_model
               if(bank_open[bank_idx(bg,ba)]) begin
                 logic [MEM_AW-1:0] ma;
                 ma = mem_addr(bg,ba,open_row[bank_idx(bg,ba)],a[DDR_COL_W-1:0]);
-                for(int b=0;b<DQ_W/8;b++) if(dm_n[b]) mem[ma][8*b +: 8] <= dq[8*b +: 8];
+                for(int b=0;b<DQ_W/8;b++) if(!dm_n[b]) mem[ma][8*b +: 8] <= dq[8*b +: 8];
               end
             end
             3'b010: begin // PRECHARGE
