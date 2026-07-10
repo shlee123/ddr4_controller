@@ -13,9 +13,15 @@ module sync_fifo #(
   output logic [WIDTH-1:0] rd_data,
   output logic empty
 );
+  if ((DEPTH < 4) || ((DEPTH & (DEPTH-1)) != 0)) begin : g_invalid_depth
+    invalid_sync_fifo_depth_must_be_power_of_two_and_at_least_4 u_invalid_depth();
+  end
+
+  localparam logic [AW:0] DEPTH_COUNT = DEPTH;
+
   logic [WIDTH-1:0] mem [0:DEPTH-1];
   logic [AW:0] wptr,rptr,count;
-  assign full = (count == DEPTH);
+  assign full = (count == DEPTH_COUNT);
   assign empty = (count == 0);
   assign rd_data = mem[rptr[AW-1:0]];
   always_ff @(posedge clk or negedge rst_n) begin

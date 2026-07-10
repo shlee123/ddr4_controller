@@ -39,8 +39,6 @@ module ddr4_scheduler #(
   output logic [AXI_ADDR_W-1:0]    cache_write_addr,
   output logic [AXI_DATA_W-1:0]    cache_write_data,
 
-  output logic                     ddr_ck_t,
-  output logic                     ddr_ck_c,
   output logic                     ddr_reset_n,
   output logic                     ddr_cke,
   output logic                     ddr_cs_n,
@@ -54,10 +52,14 @@ module ddr4_scheduler #(
   output logic                     ddr_odt,
   output logic                     ddr_par,
 
-  inout  wire [DDR_DQ_W-1:0]       ddr_dq,
-  inout  wire [DDR_DM_W-1:0]       ddr_dqs_t,
-  inout  wire [DDR_DM_W-1:0]       ddr_dqs_c,
-  inout  wire [DDR_DM_W-1:0]       ddr_dm_n
+  input  logic [DDR_DQ_W-1:0]      ddr_dq_in,
+  output logic [DDR_DQ_W-1:0]      ddr_dq_out,
+  output logic                     ddr_dq_oe,
+  output logic [DDR_DM_W-1:0]      ddr_dqs_t_out,
+  output logic [DDR_DM_W-1:0]      ddr_dqs_c_out,
+  output logic                     ddr_dqs_oe,
+  output logic [DDR_DM_W-1:0]      ddr_dm_n_out,
+  output logic                     ddr_dm_oe
 );
 
   typedef enum logic [4:0] {
@@ -89,17 +91,17 @@ module ddr4_scheduler #(
   ddr_req_t cur_req;
   ddr_req_t pending_req;
   logic     pending_valid;
-  logic [DDR_DQ_W-1:0] dq_out;
-  logic dq_oe;
 
-  assign ddr_ck_t  = clk;
-  assign ddr_ck_c  = ~clk;
-  assign ddr_dq    = dq_oe ? dq_out : 'z;
-  assign ddr_dqs_t = dq_oe ? {DDR_DM_W{clk}} : 'z;
-  assign ddr_dqs_c = dq_oe ? {DDR_DM_W{~clk}} : 'z;
-  assign ddr_dm_n  = dq_oe ? ~cur_req.wstrb[DDR_DM_W-1:0] : 'z;
+  localparam int MR_ADDR_COPY_W = (DDR_ADDR_W < 17) ? DDR_ADDR_W : 17;
 
   assign cache_lookup_addr = cur_req.addr;
+
+  function automatic [DDR_ADDR_W-1:0] mr_to_addr(input logic [16:0] mr_value);
+    begin
+      mr_to_addr = '0;
+      mr_to_addr[MR_ADDR_COPY_W-1:0] = mr_value[MR_ADDR_COPY_W-1:0];
+    end
+  endfunction
 
   function automatic [DDR_BG_W-1:0] addr_bg(input logic [AXI_ADDR_W-1:0] a);
     return a[25 +: DDR_BG_W];
@@ -165,8 +167,13 @@ module ddr4_scheduler #(
       ddr_bg            <= '0;
       ddr_ba            <= '0;
       ddr_a             <= '0;
-      dq_out            <= '0;
-      dq_oe             <= 1'b0;
+      ddr_dq_out        <= '0;
+      ddr_dq_oe         <= 1'b0;
+      ddr_dqs_t_out     <= '0;
+      ddr_dqs_c_out     <= '1;
+      ddr_dqs_oe        <= 1'b0;
+      ddr_dm_n_out      <= '1;
+      ddr_dm_oe         <= 1'b0;
       cur_req           <= '0;
       pending_req       <= '0;
       pending_valid     <= 1'b0;
@@ -180,7 +187,9 @@ module ddr4_scheduler #(
       ddr_cke           <= 1'b1;
       ddr_odt           <= 1'b1;
       ddr_par           <= 1'b0;
-      dq_oe             <= 1'b0;
+      ddr_dq_oe         <= 1'b0;
+      ddr_dqs_oe        <= 1'b0;
+      ddr_dm_oe         <= 1'b0;
       cache_write_valid <= 1'b0;
       if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
 
@@ -207,35 +216,35 @@ module ddr4_scheduler #(
         end
         INIT_MR3: begin
           ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
-          ddr_ba <= 2'd3; ddr_bg <= '0; ddr_a <= mr[3]; wait_cnt <= T_MRD_CK; state <= INIT_MR6;
+          ddr_ba <= DDR_BA_W'(3); ddr_bg <= '0; ddr_a <= mr_to_addr(mr[3]); wait_cnt <= T_MRD_CK; state <= INIT_MR6;
         end
         INIT_MR6: if (wait_cnt == 0) begin
           ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
-          ddr_ba <= 2'd2; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[6]; wait_cnt <= T_MRD_CK; state <= INIT_MR5;
+          ddr_ba <= DDR_BA_W'(2); ddr_bg <= DDR_BG_W'(1); ddr_a <= mr_to_addr(mr[6]); wait_cnt <= T_MRD_CK; state <= INIT_MR5;
         end
         INIT_MR5: if (wait_cnt == 0) begin
           ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
-          ddr_ba <= 2'd1; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[5]; wait_cnt <= T_MRD_CK; state <= INIT_MR4;
+          ddr_ba <= DDR_BA_W'(1); ddr_bg <= DDR_BG_W'(1); ddr_a <= mr_to_addr(mr[5]); wait_cnt <= T_MRD_CK; state <= INIT_MR4;
         end
         INIT_MR4: if (wait_cnt == 0) begin
           ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
-          ddr_ba <= 2'd0; ddr_bg <= {{(DDR_BG_W-1){1'b0}},1'b1}; ddr_a <= mr[4]; wait_cnt <= T_MRD_CK; state <= INIT_MR2;
+          ddr_ba <= '0; ddr_bg <= DDR_BG_W'(1); ddr_a <= mr_to_addr(mr[4]); wait_cnt <= T_MRD_CK; state <= INIT_MR2;
         end
         INIT_MR2: if (wait_cnt == 0) begin
           ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
-          ddr_ba <= 2'd2; ddr_bg <= '0; ddr_a <= mr[2]; wait_cnt <= T_MRD_CK; state <= INIT_MR1;
+          ddr_ba <= DDR_BA_W'(2); ddr_bg <= '0; ddr_a <= mr_to_addr(mr[2]); wait_cnt <= T_MRD_CK; state <= INIT_MR1;
         end
         INIT_MR1: if (wait_cnt == 0) begin
           ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
-          ddr_ba <= 2'd1; ddr_bg <= '0; ddr_a <= mr[1]; wait_cnt <= T_MRD_CK; state <= INIT_MR0;
+          ddr_ba <= DDR_BA_W'(1); ddr_bg <= '0; ddr_a <= mr_to_addr(mr[1]); wait_cnt <= T_MRD_CK; state <= INIT_MR0;
         end
         INIT_MR0: if (wait_cnt == 0) begin
           ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b0; ddr_cas_n <= 1'b0; ddr_we_n <= 1'b0;
-          ddr_ba <= 2'd0; ddr_bg <= '0; ddr_a <= mr[0]; wait_cnt <= T_MOD_CK; state <= INIT_ZQCL;
+          ddr_ba <= '0; ddr_bg <= '0; ddr_a <= mr_to_addr(mr[0]); wait_cnt <= T_MOD_CK; state <= INIT_ZQCL;
         end
         INIT_ZQCL: if (wait_cnt == 0) begin
           ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b1; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b0;
-          ddr_a <= 17'h00400; wait_cnt <= T_ZQINIT_CK[15:0]; state <= INIT_ZQWAIT;
+          ddr_a <= DDR_ADDR_W'(17'h00400); wait_cnt <= T_ZQINIT_CK[15:0]; state <= INIT_ZQWAIT;
         end
         INIT_ZQWAIT: if (wait_cnt == 0) state <= INIT_READY;
         INIT_READY: begin
@@ -258,7 +267,7 @@ module ddr4_scheduler #(
           ddr_we_n  <= addr_row(cur_req.addr)[12];
           ddr_bg    <= addr_bg(cur_req.addr);
           ddr_ba    <= addr_ba(cur_req.addr);
-          ddr_a     <= {{(DDR_ADDR_W-DDR_ROW_W){1'b0}}, addr_row(cur_req.addr)};
+          ddr_a     <= DDR_ADDR_W'(addr_row(cur_req.addr));
           wait_cnt  <= T_RCD_CK;
           state     <= APP_TRCD;
         end
@@ -275,9 +284,14 @@ module ddr4_scheduler #(
           ddr_we_n  <= 1'b0;
           ddr_bg    <= addr_bg(cur_req.addr);
           ddr_ba    <= addr_ba(cur_req.addr);
-          ddr_a     <= {{(DDR_ADDR_W-DDR_COL_W){1'b0}}, addr_col(cur_req.addr)};
-          dq_out    <= cur_req.wdata[DDR_DQ_W-1:0];
-          dq_oe     <= 1'b1;
+          ddr_a     <= DDR_ADDR_W'(addr_col(cur_req.addr));
+          ddr_dq_out    <= cur_req.wdata[DDR_DQ_W-1:0];
+          ddr_dq_oe     <= 1'b1;
+          ddr_dqs_t_out <= {DDR_DM_W{clk}};
+          ddr_dqs_c_out <= {DDR_DM_W{~clk}};
+          ddr_dqs_oe    <= 1'b1;
+          ddr_dm_n_out  <= ~cur_req.wstrb[DDR_DM_W-1:0];
+          ddr_dm_oe     <= 1'b1;
           cache_write_valid <= 1'b1;
           cache_write_addr  <= cur_req.addr;
           cache_write_data  <= cur_req.wdata;
@@ -292,14 +306,14 @@ module ddr4_scheduler #(
           ddr_we_n  <= 1'b1;
           ddr_bg    <= addr_bg(cur_req.addr);
           ddr_ba    <= addr_ba(cur_req.addr);
-          ddr_a     <= {{(DDR_ADDR_W-DDR_COL_W){1'b0}}, addr_col(cur_req.addr)};
+          ddr_a     <= DDR_ADDR_W'(addr_col(cur_req.addr));
           wait_cnt  <= T_CL_CK;
           state     <= APP_RLAT;
         end
         APP_RLAT: if (wait_cnt == 0) begin
           cache_write_valid <= 1'b1;
           cache_write_addr  <= cur_req.addr;
-          cache_write_data  <= {{(AXI_DATA_W-DDR_DQ_W){1'b0}}, ddr_dq};
+          cache_write_data  <= AXI_DATA_W'(ddr_dq_in);
           state <= APP_PRE;
         end
         APP_PRE: begin

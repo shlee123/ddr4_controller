@@ -104,37 +104,92 @@ module ddr4_controller_top #(
   } axi_addr_chan_t;
 
   logic init_done;
-  logic init_start;
-  logic [16:0] mr [0:6];
+  logic init_start_axi;
+  logic init_start_ddr;
+  logic [16:0] mr_axi [0:6];
+  logic [16:0] mr_ddr [0:6];
+  logic cfg_update_tog_axi;
+  logic cfg_ack_tog_ddr;
+  logic cfg_ack_sync1_axi, cfg_ack_sync2_axi;
+  logic cfg_update_sync1_ddr, cfg_update_sync2_ddr, cfg_update_seen_ddr;
+  logic cfg_busy_axi;
+  logic init_done_sync1_axi, init_done_sync2_axi;
 
   logic apb_wr, apb_rd;
-  assign apb_wr  = psel & penable & pwrite;
-  assign apb_rd  = psel & penable & ~pwrite;
-  assign pready  = psel & penable;
+  assign cfg_busy_axi = (cfg_update_tog_axi != cfg_ack_sync2_axi);
+  assign apb_wr  = psel & penable & pwrite & !cfg_busy_axi;
+  assign apb_rd  = psel & penable & ~pwrite & !cfg_busy_axi;
+  assign pready  = psel & penable & !cfg_busy_axi;
   assign pslverr = 1'b0;
 
   always_ff @(posedge axi_clk or negedge axi_rst_n) begin
     if (!axi_rst_n) begin
-      init_start <= 1'b1;
-      mr[0] <= 17'h0000;
-      mr[1] <= 17'h0001;
-      mr[2] <= 17'h0002;
-      mr[3] <= 17'h0003;
-      mr[4] <= 17'h0004;
-      mr[5] <= 17'h0005;
-      mr[6] <= 17'h0006;
-    end else if (apb_wr) begin
-      unique case (paddr)
-        REG_CTRL: init_start <= pwdata[0];
-        REG_MR0:  mr[0] <= pwdata[16:0];
-        REG_MR1:  mr[1] <= pwdata[16:0];
-        REG_MR2:  mr[2] <= pwdata[16:0];
-        REG_MR3:  mr[3] <= pwdata[16:0];
-        REG_MR4:  mr[4] <= pwdata[16:0];
-        REG_MR5:  mr[5] <= pwdata[16:0];
-        REG_MR6:  mr[6] <= pwdata[16:0];
-        default: ;
-      endcase
+      init_start_axi    <= 1'b1;
+      cfg_update_tog_axi <= 1'b0;
+      cfg_ack_sync1_axi  <= 1'b0;
+      cfg_ack_sync2_axi  <= 1'b0;
+      init_done_sync1_axi <= 1'b0;
+      init_done_sync2_axi <= 1'b0;
+      mr_axi[0] <= 17'h0000;
+      mr_axi[1] <= 17'h0001;
+      mr_axi[2] <= 17'h0002;
+      mr_axi[3] <= 17'h0003;
+      mr_axi[4] <= 17'h0004;
+      mr_axi[5] <= 17'h0005;
+      mr_axi[6] <= 17'h0006;
+    end else begin
+      cfg_ack_sync1_axi <= cfg_ack_tog_ddr;
+      cfg_ack_sync2_axi <= cfg_ack_sync1_axi;
+      init_done_sync1_axi <= init_done;
+      init_done_sync2_axi <= init_done_sync1_axi;
+
+      if (apb_wr) begin
+        unique case (paddr)
+          REG_CTRL: init_start_axi <= pwdata[0];
+          REG_MR0:  mr_axi[0] <= pwdata[16:0];
+          REG_MR1:  mr_axi[1] <= pwdata[16:0];
+          REG_MR2:  mr_axi[2] <= pwdata[16:0];
+          REG_MR3:  mr_axi[3] <= pwdata[16:0];
+          REG_MR4:  mr_axi[4] <= pwdata[16:0];
+          REG_MR5:  mr_axi[5] <= pwdata[16:0];
+          REG_MR6:  mr_axi[6] <= pwdata[16:0];
+          default: ;
+        endcase
+        cfg_update_tog_axi <= ~cfg_update_tog_axi;
+      end
+    end
+  end
+
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      init_start_ddr      <= 1'b1;
+      cfg_ack_tog_ddr     <= 1'b0;
+      cfg_update_sync1_ddr <= 1'b0;
+      cfg_update_sync2_ddr <= 1'b0;
+      cfg_update_seen_ddr  <= 1'b0;
+      mr_ddr[0] <= 17'h0000;
+      mr_ddr[1] <= 17'h0001;
+      mr_ddr[2] <= 17'h0002;
+      mr_ddr[3] <= 17'h0003;
+      mr_ddr[4] <= 17'h0004;
+      mr_ddr[5] <= 17'h0005;
+      mr_ddr[6] <= 17'h0006;
+    end else begin
+      cfg_update_sync1_ddr <= cfg_update_tog_axi;
+      cfg_update_sync2_ddr <= cfg_update_sync1_ddr;
+
+      if (cfg_update_sync2_ddr != cfg_update_seen_ddr) begin
+        init_start_ddr <= init_start_axi;
+        mr_ddr[0] <= mr_axi[0];
+        mr_ddr[1] <= mr_axi[1];
+        mr_ddr[2] <= mr_axi[2];
+        mr_ddr[3] <= mr_axi[3];
+        mr_ddr[4] <= mr_axi[4];
+        mr_ddr[5] <= mr_axi[5];
+        mr_ddr[6] <= mr_axi[6];
+        cfg_update_seen_ddr <= cfg_update_sync2_ddr;
+        cfg_ack_tog_ddr <= cfg_update_sync2_ddr;
+      end
     end
   end
 
@@ -142,15 +197,15 @@ module ddr4_controller_top #(
     prdata = '0;
     if (apb_rd) begin
       unique case (paddr)
-        REG_CTRL:   prdata = {{(APB_DATA_W-1){1'b0}}, init_start};
-        REG_STATUS: prdata = {{(APB_DATA_W-2){1'b0}}, ddr_alert_n, init_done};
-        REG_MR0:    prdata = {{(APB_DATA_W-17){1'b0}}, mr[0]};
-        REG_MR1:    prdata = {{(APB_DATA_W-17){1'b0}}, mr[1]};
-        REG_MR2:    prdata = {{(APB_DATA_W-17){1'b0}}, mr[2]};
-        REG_MR3:    prdata = {{(APB_DATA_W-17){1'b0}}, mr[3]};
-        REG_MR4:    prdata = {{(APB_DATA_W-17){1'b0}}, mr[4]};
-        REG_MR5:    prdata = {{(APB_DATA_W-17){1'b0}}, mr[5]};
-        REG_MR6:    prdata = {{(APB_DATA_W-17){1'b0}}, mr[6]};
+        REG_CTRL:   prdata = {{(APB_DATA_W-1){1'b0}}, init_start_axi};
+        REG_STATUS: prdata = {{(APB_DATA_W-2){1'b0}}, ddr_alert_n, init_done_sync2_axi};
+        REG_MR0:    prdata = {{(APB_DATA_W-17){1'b0}}, mr_axi[0]};
+        REG_MR1:    prdata = {{(APB_DATA_W-17){1'b0}}, mr_axi[1]};
+        REG_MR2:    prdata = {{(APB_DATA_W-17){1'b0}}, mr_axi[2]};
+        REG_MR3:    prdata = {{(APB_DATA_W-17){1'b0}}, mr_axi[3]};
+        REG_MR4:    prdata = {{(APB_DATA_W-17){1'b0}}, mr_axi[4]};
+        REG_MR5:    prdata = {{(APB_DATA_W-17){1'b0}}, mr_axi[5]};
+        REG_MR6:    prdata = {{(APB_DATA_W-17){1'b0}}, mr_axi[6]};
         default:    prdata = '0;
       endcase
     end
@@ -246,6 +301,26 @@ module ddr4_controller_top #(
   logic                  cache_write_valid;
   logic [AXI_ADDR_W-1:0] cache_write_addr;
   logic [AXI_DATA_W-1:0] cache_write_data;
+  logic [DDR_DQ_W-1:0]   ddr_dq_in;
+  logic [DDR_DQ_W-1:0]   ddr_dq_out;
+  logic                  ddr_dq_oe;
+  logic [DDR_DM_W-1:0]   ddr_dqs_t_out;
+  logic [DDR_DM_W-1:0]   ddr_dqs_c_out;
+  logic                  ddr_dqs_oe;
+  logic [DDR_DM_W-1:0]   ddr_dm_n_out;
+  logic                  ddr_dm_oe;
+
+  assign ddr_dq      = ddr_dq_oe  ? ddr_dq_out    : {DDR_DQ_W{1'bz}};
+  assign ddr_dqs_t   = ddr_dqs_oe ? ddr_dqs_t_out : {DDR_DM_W{1'bz}};
+  assign ddr_dqs_c   = ddr_dqs_oe ? ddr_dqs_c_out : {DDR_DM_W{1'bz}};
+  assign ddr_dm_n    = ddr_dm_oe  ? ddr_dm_n_out  : {DDR_DM_W{1'bz}};
+  assign ddr_dq_in   = ddr_dq;
+
+  ddr4_ck_out u_ddr_ck_out (
+    .clk(clk),
+    .ck_t(ddr_ck_t),
+    .ck_c(ddr_ck_c)
+  );
 
   ddr4_data_cache #(
     .AXI_ADDR_W(AXI_ADDR_W),
@@ -274,9 +349,9 @@ module ddr4_controller_top #(
   ) u_scheduler (
     .clk(clk),
     .rst_n(rst_n),
-    .init_start(init_start),
+    .init_start(init_start_ddr),
     .init_done(init_done),
-    .mr(mr),
+    .mr(mr_ddr),
     .wr_req_data(wr_req_out),
     .wr_req_empty(wr_req_empty),
     .wr_req_rd(wr_req_rd),
@@ -292,8 +367,6 @@ module ddr4_controller_top #(
     .cache_write_valid(cache_write_valid),
     .cache_write_addr(cache_write_addr),
     .cache_write_data(cache_write_data),
-    .ddr_ck_t(ddr_ck_t),
-    .ddr_ck_c(ddr_ck_c),
     .ddr_reset_n(ddr_reset_n),
     .ddr_cke(ddr_cke),
     .ddr_cs_n(ddr_cs_n),
@@ -306,10 +379,14 @@ module ddr4_controller_top #(
     .ddr_a(ddr_a),
     .ddr_odt(ddr_odt),
     .ddr_par(ddr_par),
-    .ddr_dq(ddr_dq),
-    .ddr_dqs_t(ddr_dqs_t),
-    .ddr_dqs_c(ddr_dqs_c),
-    .ddr_dm_n(ddr_dm_n)
+    .ddr_dq_in(ddr_dq_in),
+    .ddr_dq_out(ddr_dq_out),
+    .ddr_dq_oe(ddr_dq_oe),
+    .ddr_dqs_t_out(ddr_dqs_t_out),
+    .ddr_dqs_c_out(ddr_dqs_c_out),
+    .ddr_dqs_oe(ddr_dqs_oe),
+    .ddr_dm_n_out(ddr_dm_n_out),
+    .ddr_dm_oe(ddr_dm_oe)
   );
 
 endmodule : ddr4_controller_top

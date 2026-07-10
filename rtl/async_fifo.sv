@@ -17,6 +17,12 @@ module async_fifo #(
   output logic [WIDTH-1:0] rd_data,
   output logic             rd_empty
 );
+  if ((DEPTH < 4) || ((DEPTH & (DEPTH-1)) != 0)) begin : g_invalid_depth
+    invalid_async_fifo_depth_must_be_power_of_two_and_at_least_4 u_invalid_depth();
+  end
+
+  localparam logic [AW:0] ALMOST_FULL_LEVEL = DEPTH - 2;
+
   logic [WIDTH-1:0] mem [0:DEPTH-1];
   logic [AW:0] wbin, wgray, rbin, rgray;
   logic [AW:0] wgray_r1, wgray_r2, rgray_w1, rgray_w2;
@@ -43,7 +49,7 @@ module async_fifo #(
 
   logic [AW:0] used_w;
   assign used_w = wbin - gray2bin(rgray_w2);
-  assign wr_almost_full = (used_w >= DEPTH-2);
+  assign wr_almost_full = (used_w >= ALMOST_FULL_LEVEL);
 
   always_ff @(posedge wr_clk or negedge wr_rst_n) begin
     if(!wr_rst_n) begin
