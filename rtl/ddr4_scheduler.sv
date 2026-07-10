@@ -130,7 +130,9 @@ module ddr4_scheduler #(
   endtask
 
   logic can_prefetch;
+  logic [DDR_ROW_W-1:0] cur_row;
   assign can_prefetch = init_done && !pending_valid && !rsp_full;
+  assign cur_row      = addr_row(cur_req.addr);
 
   always_comb begin
     rd_req_rd = 1'b0;
@@ -262,9 +264,9 @@ module ddr4_scheduler #(
         APP_ACT: begin
           ddr_cs_n  <= 1'b0;
           ddr_act_n <= 1'b0;
-          ddr_ras_n <= addr_row(cur_req.addr)[14];
-          ddr_cas_n <= addr_row(cur_req.addr)[13];
-          ddr_we_n  <= addr_row(cur_req.addr)[12];
+          ddr_ras_n <= cur_row[14];
+          ddr_cas_n <= cur_row[13];
+          ddr_we_n  <= cur_row[12];
           ddr_bg    <= addr_bg(cur_req.addr);
           ddr_ba    <= addr_ba(cur_req.addr);
           ddr_a     <= DDR_ADDR_W'(addr_row(cur_req.addr));
