@@ -4,8 +4,8 @@ module ddr4_ctrl_tb;
 
   logic axi_clk=0, axi_rst_n=0;
   logic clk=0, rst_n=0;
-  always #2.5 axi_clk = ~axi_clk; // 200 MHz AXI/APB domain
-  always #1.0 clk     = ~clk;     // 500 MHz DDR domain
+  always #2.5 axi_clk = ~axi_clk;
+  always #1.0 clk     = ~clk;
 
   logic [31:0] s_axi_awaddr, s_axi_wdata, s_axi_araddr;
   logic [7:0]  s_axi_awlen, s_axi_arlen;
@@ -51,8 +51,11 @@ module ddr4_ctrl_tb;
   );
 
   task automatic axi_write(input logic [31:0] addr, input logic [31:0] data);
+    logic aw_done;
+    logic w_done;
     begin
-      @(posedge axi_clk);
+      aw_done = 1'b0;
+      w_done  = 1'b0;
       s_axi_awaddr  <= addr;
       s_axi_awlen   <= 8'd0;
       s_axi_awsize  <= 3'd2;
@@ -63,10 +66,17 @@ module ddr4_ctrl_tb;
       s_axi_wlast   <= 1'b1;
       s_axi_wvalid  <= 1'b1;
       s_axi_bready  <= 1'b1;
-      while (!(s_axi_awready && s_axi_wready)) @(posedge axi_clk);
-      @(posedge axi_clk);
-      s_axi_awvalid <= 1'b0;
-      s_axi_wvalid  <= 1'b0;
+      while (!(aw_done && w_done)) begin
+        @(posedge axi_clk);
+        if (s_axi_awvalid && s_axi_awready) begin
+          s_axi_awvalid <= 1'b0;
+          aw_done = 1'b1;
+        end
+        if (s_axi_wvalid && s_axi_wready) begin
+          s_axi_wvalid <= 1'b0;
+          w_done = 1'b1;
+        end
+      end
       while (!s_axi_bvalid) @(posedge axi_clk);
       @(posedge axi_clk);
       s_axi_bready <= 1'b0;
@@ -75,15 +85,13 @@ module ddr4_ctrl_tb;
 
   task automatic axi_read(input logic [31:0] addr, output logic [31:0] data);
     begin
-      @(posedge axi_clk);
       s_axi_araddr  <= addr;
       s_axi_arlen   <= 8'd0;
       s_axi_arsize  <= 3'd2;
       s_axi_arburst <= 2'b01;
       s_axi_arvalid <= 1'b1;
       s_axi_rready  <= 1'b1;
-      while (!s_axi_arready) @(posedge axi_clk);
-      @(posedge axi_clk);
+      do @(posedge axi_clk); while (!s_axi_arready);
       s_axi_arvalid <= 1'b0;
       while (!s_axi_rvalid) @(posedge axi_clk);
       data = s_axi_rdata;
@@ -94,8 +102,10 @@ module ddr4_ctrl_tb;
 
   int errors = 0;
   initial begin
-    $fsdbDumpfile("ddr4_ctrl_v2_1.fsdb");
-    $fsdbDumpvars(0, ddr4_ctrl_tb);
+    `ifdef FSDB
+      $fsdbDumpfile("ddr4_ctrl_v2_2.fsdb");
+      $fsdbDumpvars(0, ddr4_ctrl_tb);
+    `endif
 
     s_axi_awaddr=0; s_axi_awlen=0; s_axi_awsize=0; s_axi_awburst=0; s_axi_awvalid=0;
     s_axi_wdata=0; s_axi_wstrb=0; s_axi_wlast=0; s_axi_wvalid=0; s_axi_bready=0;
@@ -119,8 +129,8 @@ module ddr4_ctrl_tb;
       end
     end
 
-    if(errors == 0) $display("DDR4_CONTROLLER_TOP_V2_1_RANDOM_TEST_PASS");
-    else            $display("DDR4_CONTROLLER_TOP_V2_1_RANDOM_TEST_FAIL errors=%0d", errors);
+    if(errors == 0) $display("DDR4_CONTROLLER_TOP_V2_2_RANDOM_TEST_PASS");
+    else            $display("DDR4_CONTROLLER_TOP_V2_2_RANDOM_TEST_FAIL errors=%0d", errors);
     #100 $finish;
   end
 endmodule
