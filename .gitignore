@@ -10,6 +10,12 @@ ucli.key
 *.log
 *.jou
 *.pb
+build/
+*.dcp
+*.bit
+*.rpt
+*.xpr
+.Xil/
 
 # Editor/OS files
 .DS_Store
