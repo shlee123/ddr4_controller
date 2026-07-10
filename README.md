@@ -2,6 +2,25 @@
 
 This package contains a synthesizable DDR4 controller reference RTL plus a VCS simulation environment.
 
+## FPGA/Vivado clock output
+
+The Linux MPS3 FPGA flow uses Vivado by default. Define `FPGA` for FPGA
+compilation so that `ddr4_ck_out` instantiates `ddr4_fpga_clockgen`, which
+generates the external differential DDR clock with Xilinx `ODDR` and
+`OBUFDS` primitives. Builds without `FPGA` retain the portable
+simulation/ASIC fallback.
+
+Run batch synthesis from the repository root after selecting the exact Xilinx
+device part used by the target image:
+
+```bash
+XILINX_PART=<vivado-part> vivado -mode batch -source synth/vivado/mps3_synth.tcl
+```
+
+The Tcl entry point supplies `FPGA` automatically. Board pin assignments and
+I/O standards remain platform constraints and must be provided by the target
+MPS3 integration; this repository does not guess a device part or pinout.
+
 ## V2.1 changes
 - AXI/APB clock domain is 200MHz (`aclk`).
 - DRAM/controller clock domain is 500MHz (`ddr_clk`).
