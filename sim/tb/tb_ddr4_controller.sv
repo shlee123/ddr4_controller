@@ -96,6 +96,8 @@ module tb_ddr4_controller;
     .DDR_BA_W(DDR_BA_W),
     .DDR_DQ_W(DDR_DQ_W)
   ) u_dut (
+    .axi_clk       (clk),
+    .axi_rst_n     (rst_n),
     .clk           (clk),
     .rst_n         (rst_n),
     .s_axi_awaddr  ('0),
@@ -145,16 +147,18 @@ module tb_ddr4_controller;
     .ddr_a         (ddr_a),
     .ddr_odt       (ddr_odt),
     .ddr_par       (ddr_par),
-    .ddr_alert_n   (ddr_alert_n)
+    .ddr_alert_n   (ddr_alert_n),
+    .ddr_dq        (ddr_dq),
+    .ddr_dqs_t     (ddr_dqs_t),
+    .ddr_dqs_c     (ddr_dqs_c),
+    .ddr_dm_n      (ddr_dm_n)
   );
 
   ddr4_sdram_model #(
-    .ROW_W(15),
-    .COL_W(10),
-    .BANK_W(2),
-    .BG_W(2),
     .DQ_W(16),
-    .X16_MODE(1'b1)
+    .ADDR_W(17),
+    .BA_W(2),
+    .BG_W(2)
   ) u_ddr4_model (
     .ck_t    (ddr_ck_t),
     .ck_c    (ddr_ck_c),
@@ -169,7 +173,6 @@ module tb_ddr4_controller;
     .ba      (ddr_ba),
     .a       (ddr_a),
     .odt     (ddr_odt),
-    .par     (ddr_par),
     .alert_n (ddr_alert_n),
     .dq      (ddr_dq),
     .dqs_t   (ddr_dqs_t),
