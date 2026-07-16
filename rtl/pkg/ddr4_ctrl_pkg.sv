@@ -2,6 +2,8 @@
 // DDR4 controller common package.
 // Compile this file once before RTL modules. Do not `include this package in RTL files.
 
+`timescale 1ns/1ps
+
 package ddr4_ctrl_pkg;
 
   parameter int AXI_ADDR_W = 32;
