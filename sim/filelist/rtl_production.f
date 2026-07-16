@@ -1,0 +1,10 @@
++incdir+../../rtl/pkg
+../../rtl/pkg/ddr4_ctrl_pkg.sv
+../../rtl/sync_fifo.sv
+../../rtl/async_fifo.sv
+../../rtl/ddr4_data_cache.sv
+../../rtl/ddr4_scheduler.sv
+../../rtl/phy/ddr4_fpga_clockgen.sv
+../../rtl/phy/ddr4_ck_out.sv
+../../rtl/phy/ddr4_dq_dqs_phy.sv
+../../rtl/ddr4_controller_top.sv
