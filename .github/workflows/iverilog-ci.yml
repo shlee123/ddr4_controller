@@ -1,0 +1,44 @@
+name: Icarus Verilog CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulation:
+    name: Compile and simulate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+          iverilog -V
+          vvp -V
+
+      - name: Run AXI burst-read regression
+        working-directory: sim
+        run: make iverilog
+
+      - name: Upload simulation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iverilog-simulation-logs
+          path: |
+            sim/build_iverilog/compile.log
+            sim/build_iverilog/sim.log
+          if-no-files-found: warn
+          retention-days: 14
