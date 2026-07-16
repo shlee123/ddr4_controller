@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   smoke_regression:
@@ -64,6 +65,42 @@ jobs:
             sim/build_iverilog/sim.log
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Publish CI report issue
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          CI_STATUS: ${{ job.status }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        with:
+          script: |
+            const fs = require('fs');
+            const tail = (path) => {
+              if (!fs.existsSync(path)) return '(log file not generated)';
+              const text = fs.readFileSync(path, 'utf8');
+              return text.slice(-12000);
+            };
+            const compileLog = tail('sim/build_iverilog/compile.log');
+            const simLog = tail('sim/build_iverilog/sim.log');
+            const title = `[Icarus CI] ${process.env.CI_STATUS}: ${process.env.COMMIT_SHA.substring(0, 8)}`;
+            const body = [
+              `Status: **${process.env.CI_STATUS}**`,
+              `Commit: \`${process.env.COMMIT_SHA}\``,
+              `Run: ${process.env.RUN_URL}`,
+              '',
+              '## Compile log',
+              '```text', compileLog, '```',
+              '',
+              '## Simulation log',
+              '```text', simLog, '```'
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body
+            });
 
   production_rtl_compile:
     name: Production RTL compile tracking
