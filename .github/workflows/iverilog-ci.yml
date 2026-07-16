@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  simulation:
-    name: Compile and simulate
+  smoke_regression:
+    name: Icarus-compatible AXI burst-read regression
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -30,7 +30,7 @@ jobs:
           iverilog -V
           vvp -V
 
-      - name: Check simulation scripts
+      - name: Check simulation scripts and filelists
         run: |
           bash -n sim/scripts/run_iverilog.sh
           test -f sim/filelist/rtl.f
@@ -58,9 +58,53 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: iverilog-simulation-logs-${{ github.run_id }}
+          name: iverilog-smoke-logs-${{ github.run_id }}
           path: |
             sim/build_iverilog/compile.log
             sim/build_iverilog/sim.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  production_rtl_compile:
+    name: Production RTL compile tracking
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+
+      - name: Compile production RTL
+        working-directory: sim
+        run: |
+          rm -rf build_production
+          mkdir -p build_production
+          cd build_production
+          set -o pipefail
+          iverilog -g2012 -Wall -Wimplicit \
+            -s ddr4_controller_top \
+            -o production_elab \
+            -f ../filelist/rtl_production.f \
+            2>&1 | tee compile_production.log
+
+      - name: Print production compile log
+        if: always()
+        run: |
+          if [ -f sim/build_production/compile_production.log ]; then
+            cat sim/build_production/compile_production.log
+          fi
+
+      - name: Upload production compile log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iverilog-production-compile-${{ github.run_id }}
+          path: sim/build_production/compile_production.log
           if-no-files-found: warn
           retention-days: 14
