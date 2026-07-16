@@ -2,9 +2,6 @@ name: Icarus Verilog CI
 
 on:
   push:
-    branches:
-      - main
-      - master
   pull_request:
   workflow_dispatch:
 
@@ -21,6 +18,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Show repository revision
+        run: |
+          git rev-parse HEAD
+          find rtl sim -maxdepth 4 -type f | sort
+
       - name: Install Icarus Verilog
         run: |
           sudo apt-get update
@@ -28,15 +30,35 @@ jobs:
           iverilog -V
           vvp -V
 
+      - name: Check simulation scripts
+        run: |
+          bash -n sim/scripts/run_iverilog.sh
+          test -f sim/filelist/rtl.f
+          test -f sim/filelist/tb.f
+
       - name: Run AXI burst-read regression
         working-directory: sim
         run: make iverilog
+
+      - name: Print compile log
+        if: always()
+        run: |
+          if [ -f sim/build_iverilog/compile.log ]; then
+            cat sim/build_iverilog/compile.log
+          fi
+
+      - name: Print simulation log
+        if: always()
+        run: |
+          if [ -f sim/build_iverilog/sim.log ]; then
+            cat sim/build_iverilog/sim.log
+          fi
 
       - name: Upload simulation logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: iverilog-simulation-logs
+          name: iverilog-simulation-logs-${{ github.run_id }}
           path: |
             sim/build_iverilog/compile.log
             sim/build_iverilog/sim.log
