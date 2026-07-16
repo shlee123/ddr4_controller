@@ -6,5 +6,8 @@
 ../rtl/phy/ddr4_fpga_clockgen.sv
 ../rtl/phy/ddr4_ck_out.sv
 ../rtl/ddr4_controller_top.sv
+../rtl/platform/ddr4_clock_manager.sv
+../rtl/platform/ddr4_mps3_native_top.sv
+../rtl/platform/ddr4_mps3_mig_platform.sv
 ./model/ddr4_sdram_model.sv
 ./tb/ddr4_ctrl_tb.sv

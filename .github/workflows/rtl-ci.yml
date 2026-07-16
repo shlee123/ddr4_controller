@@ -1,0 +1,27 @@
+name: RTL structural CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  license-free-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install open-source RTL tools
+        run: sudo apt-get update && sudo apt-get install -y verilator tcl shellcheck
+      - name: Shell syntax and lint
+        run: |
+          bash -n sim/run_vcs.sh sim/scripts/run_vcs.sh
+          shellcheck sim/run_vcs.sh sim/scripts/run_vcs.sh
+      - name: Tcl parser checks
+        run: tclsh scripts/check_tcl.tcl synth/vivado/mps3_build.tcl synth/vivado/mps3_synth.tcl
+      - name: Project structural checks
+        run: python3 scripts/check_project.py
+      - name: Portable RTL lint/elaboration
+        working-directory: sim/filelist
+        run: verilator --lint-only --timing -Wno-fatal --top-module ddr4_controller_top -f rtl.f
+
+  # Vivado and VCS require licensed installations. Sites can enable equivalent
+  # jobs on a self-hosted runner and invoke the documented commands.
