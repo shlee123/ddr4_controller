@@ -103,10 +103,9 @@ jobs:
             });
 
   production_rtl_compile:
-    name: Production RTL compile tracking
+    name: Production RTL compile gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
 
     steps:
       - name: Checkout repository
