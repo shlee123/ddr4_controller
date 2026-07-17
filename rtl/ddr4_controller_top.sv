@@ -2,6 +2,8 @@
 // DDR4 controller top-level, Version 2.2.
 // AXI/APB front-end plus modular DDR scheduler and 64-line data cache.
 
+`timescale 1ns/1ps
+
 import ddr4_ctrl_pkg::*;
 
 module ddr4_controller_top #(
@@ -124,10 +126,10 @@ module ddr4_controller_top #(
 
   always_ff @(posedge axi_clk or negedge axi_rst_n) begin
     if (!axi_rst_n) begin
-      init_start_axi    <= 1'b1;
-      cfg_update_tog_axi <= 1'b0;
-      cfg_ack_sync1_axi  <= 1'b0;
-      cfg_ack_sync2_axi  <= 1'b0;
+      init_start_axi      <= 1'b1;
+      cfg_update_tog_axi  <= 1'b0;
+      cfg_ack_sync1_axi   <= 1'b0;
+      cfg_ack_sync2_axi   <= 1'b0;
       init_done_sync1_axi <= 1'b0;
       init_done_sync2_axi <= 1'b0;
       mr_axi[0] <= 17'h0000;
@@ -138,8 +140,8 @@ module ddr4_controller_top #(
       mr_axi[5] <= 17'h0005;
       mr_axi[6] <= 17'h0006;
     end else begin
-      cfg_ack_sync1_axi <= cfg_ack_tog_ddr;
-      cfg_ack_sync2_axi <= cfg_ack_sync1_axi;
+      cfg_ack_sync1_axi   <= cfg_ack_tog_ddr;
+      cfg_ack_sync2_axi   <= cfg_ack_sync1_axi;
       init_done_sync1_axi <= init_done;
       init_done_sync2_axi <= init_done_sync1_axi;
 
@@ -162,8 +164,8 @@ module ddr4_controller_top #(
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      init_start_ddr      <= 1'b1;
-      cfg_ack_tog_ddr     <= 1'b0;
+      init_start_ddr       <= 1'b1;
+      cfg_ack_tog_ddr      <= 1'b0;
       cfg_update_sync1_ddr <= 1'b0;
       cfg_update_sync2_ddr <= 1'b0;
       cfg_update_seen_ddr  <= 1'b0;
@@ -188,7 +190,7 @@ module ddr4_controller_top #(
         mr_ddr[5] <= mr_axi[5];
         mr_ddr[6] <= mr_axi[6];
         cfg_update_seen_ddr <= cfg_update_sync2_ddr;
-        cfg_ack_tog_ddr <= cfg_update_sync2_ddr;
+        cfg_ack_tog_ddr     <= cfg_update_sync2_ddr;
       end
     end
   end
@@ -212,8 +214,16 @@ module ddr4_controller_top #(
   end
 
   axi_addr_chan_t aw_in, aw_out, ar_in, ar_out;
-  assign aw_in = '{addr:s_axi_awaddr, len:s_axi_awlen, size:s_axi_awsize, burst:s_axi_awburst};
-  assign ar_in = '{addr:s_axi_araddr, len:s_axi_arlen, size:s_axi_arsize, burst:s_axi_arburst};
+  always_comb begin
+    aw_in.addr  = s_axi_awaddr;
+    aw_in.len   = s_axi_awlen;
+    aw_in.size  = s_axi_awsize;
+    aw_in.burst = s_axi_awburst;
+    ar_in.addr  = s_axi_araddr;
+    ar_in.len   = s_axi_arlen;
+    ar_in.size  = s_axi_arsize;
+    ar_in.burst = s_axi_arburst;
+  end
 
   logic awf_wr, awf_rd, awf_full, awf_empty;
   logic arf_wr, arf_rd, arf_full, arf_empty;
@@ -238,10 +248,23 @@ module ddr4_controller_top #(
   logic wr_req_empty, rd_req_empty;
   logic rsp_wr, rsp_rd, rsp_full, rsp_afull, rsp_empty;
 
-  assign wr_req_in = '{wr:1'b1, addr:aw_out.addr, wdata:s_axi_wdata, wstrb:s_axi_wstrb,
-                       len:aw_out.len, size:aw_out.size, burst:aw_out.burst};
-  assign rd_req_in = '{wr:1'b0, addr:ar_out.addr, wdata:'0, wstrb:'0,
-                       len:ar_out.len, size:ar_out.size, burst:ar_out.burst};
+  always_comb begin
+    wr_req_in.wr     = 1'b1;
+    wr_req_in.addr   = aw_out.addr;
+    wr_req_in.wdata  = s_axi_wdata;
+    wr_req_in.wstrb  = s_axi_wstrb;
+    wr_req_in.len    = aw_out.len;
+    wr_req_in.size   = aw_out.size;
+    wr_req_in.burst  = aw_out.burst;
+
+    rd_req_in.wr     = 1'b0;
+    rd_req_in.addr   = ar_out.addr;
+    rd_req_in.wdata  = '0;
+    rd_req_in.wstrb  = '0;
+    rd_req_in.len    = ar_out.len;
+    rd_req_in.size   = ar_out.size;
+    rd_req_in.burst  = ar_out.burst;
+  end
 
   assign s_axi_wready = !awf_empty && !wr_req_full;
   assign wr_req_wr    = s_axi_wvalid && s_axi_wready;
@@ -271,6 +294,7 @@ module ddr4_controller_top #(
       s_axi_rresp  <= 2'b00;
       s_axi_rdata  <= '0;
       s_axi_rlast  <= 1'b0;
+      rsp_hold     <= '0;
     end else begin
       if (s_axi_bvalid && s_axi_bready) s_axi_bvalid <= 1'b0;
       if (s_axi_rvalid && s_axi_rready) s_axi_rvalid <= 1'b0;
