@@ -2,6 +2,8 @@
 // DDR4 initialization/application scheduler.
 // V2.2 adds a one-entry next-request prefetch buffer while preserving AR priority.
 
+`timescale 1ns/1ps
+
 import ddr4_ctrl_pkg::*;
 
 module ddr4_scheduler #(
@@ -91,10 +93,12 @@ module ddr4_scheduler #(
   ddr_req_t cur_req;
   ddr_req_t pending_req;
   logic     pending_valid;
+  logic [DDR_ROW_W-1:0] cur_row;
 
   localparam int MR_ADDR_COPY_W = (DDR_ADDR_W < 17) ? DDR_ADDR_W : 17;
 
   assign cache_lookup_addr = cur_req.addr;
+  assign cur_row = addr_row(cur_req.addr);
 
   function automatic [DDR_ADDR_W-1:0] mr_to_addr(input logic [16:0] mr_value);
     begin
@@ -104,19 +108,27 @@ module ddr4_scheduler #(
   endfunction
 
   function automatic [DDR_BG_W-1:0] addr_bg(input logic [AXI_ADDR_W-1:0] a);
-    return a[25 +: DDR_BG_W];
+    begin
+      addr_bg = a[25 +: DDR_BG_W];
+    end
   endfunction
 
   function automatic [DDR_BA_W-1:0] addr_ba(input logic [AXI_ADDR_W-1:0] a);
-    return a[23 +: DDR_BA_W];
+    begin
+      addr_ba = a[23 +: DDR_BA_W];
+    end
   endfunction
 
   function automatic [DDR_ROW_W-1:0] addr_row(input logic [AXI_ADDR_W-1:0] a);
-    return a[22:8];
+    begin
+      addr_row = a[22:8];
+    end
   endfunction
 
   function automatic [DDR_COL_W-1:0] addr_col(input logic [AXI_ADDR_W-1:0] a);
-    return a[11:2];
+    begin
+      addr_col = a[11:2];
+    end
   endfunction
 
   task automatic drive_des;
@@ -194,11 +206,11 @@ module ddr4_scheduler #(
       if (wait_cnt != 0) wait_cnt <= wait_cnt - 1'b1;
 
       if (rd_req_rd) begin
-        pending_req   <= rd_req_data;
-        pending_valid <= 1'b1;
+        pending_req    <= rd_req_data;
+        pending_valid  <= 1'b1;
       end else if (wr_req_rd) begin
-        pending_req   <= wr_req_data;
-        pending_valid <= 1'b1;
+        pending_req    <= wr_req_data;
+        pending_valid  <= 1'b1;
       end
 
       unique case (state)
@@ -260,16 +272,16 @@ module ddr4_scheduler #(
           end
         end
         APP_ACT: begin
-          ddr_cs_n  <= 1'b0;
-          ddr_act_n <= 1'b0;
-          ddr_ras_n <= addr_row(cur_req.addr)[14];
-          ddr_cas_n <= addr_row(cur_req.addr)[13];
-          ddr_we_n  <= addr_row(cur_req.addr)[12];
-          ddr_bg    <= addr_bg(cur_req.addr);
-          ddr_ba    <= addr_ba(cur_req.addr);
-          ddr_a     <= DDR_ADDR_W'(addr_row(cur_req.addr));
-          wait_cnt  <= T_RCD_CK;
-          state     <= APP_TRCD;
+          ddr_cs_n   <= 1'b0;
+          ddr_act_n  <= 1'b0;
+          ddr_ras_n  <= cur_row[14];
+          ddr_cas_n  <= cur_row[13];
+          ddr_we_n   <= cur_row[12];
+          ddr_bg     <= addr_bg(cur_req.addr);
+          ddr_ba     <= addr_ba(cur_req.addr);
+          ddr_a      <= DDR_ADDR_W'(cur_row);
+          wait_cnt   <= T_RCD_CK;
+          state      <= APP_TRCD;
         end
         APP_TRCD: if (wait_cnt == 0) begin
           if (cur_req.wr) state <= APP_WR;
@@ -331,12 +343,12 @@ module ddr4_scheduler #(
         end
         APP_TRP: if (wait_cnt == 0) state <= APP_RESP;
         APP_RESP: if (!rsp_full) begin
-          if (cur_req.wr) begin
-            rsp_data <= '{wr:1'b1, addr:cur_req.addr, rdata:'0, resp:2'b00, last:1'b1};
-          end else begin
-            rsp_data <= '{wr:1'b0, addr:cur_req.addr, rdata:cache_lookup_data, resp:2'b00, last:1'b1};
-          end
-          state <= APP_IDLE;
+          rsp_data.wr    <= cur_req.wr;
+          rsp_data.addr  <= cur_req.addr;
+          rsp_data.rdata <= cur_req.wr ? '0 : cache_lookup_data;
+          rsp_data.resp  <= 2'b00;
+          rsp_data.last  <= 1'b1;
+          state          <= APP_IDLE;
         end
         default: state <= INIT_RESET;
       endcase
