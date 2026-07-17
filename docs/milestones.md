@@ -10,25 +10,25 @@ Status: **PASS**
 
 ## M2 — Production RTL compile
 
-Status: **IN PROGRESS**
+Status: **PASS**
 
-Acceptance criteria:
+Acceptance criteria completed:
 
 - `sim/filelist/rtl_production.f` elaborates `ddr4_controller_top` with Icarus Verilog.
-- No compatibility replacement top is used.
-- Production compile job is mandatory and no longer uses `continue-on-error`.
-- No inherited-timescale warnings remain in production RTL.
+- No compatibility replacement top is used by the production compile job.
+- Production compile is a mandatory CI gate.
+- Inherited-timescale warnings were removed from the package, scheduler, data cache, and controller top.
+- Icarus-incompatible function-result bit selections and named packed-struct assignment patterns were replaced with portable RTL.
 
-Current blockers identified from CI run 29543065135:
-
-- Icarus-incompatible direct bit selection from function results in `rtl/ddr4_scheduler.sv`.
-- Icarus-incompatible named packed-struct assignment patterns in `rtl/ddr4_scheduler.sv` and `rtl/ddr4_controller_top.sv`.
-- Missing explicit time units in `rtl/ddr4_data_cache.sv`, `rtl/ddr4_scheduler.sv`, and `rtl/ddr4_controller_top.sv`.
+Reference CI run: `29544225711`.
 
 ## M3 — Production RTL functional regression
 
-Planned after M2:
+Status: **IN PROGRESS**
+
+Planned work:
 
 - Instantiate the production `ddr4_controller_top` with the behavioral DDR4 model.
 - Verify APB initialization and AXI read/write paths across asynchronous clock domains.
 - Add scoreboarding, timeout checks, and CI artifacts.
+- Replace the compatibility smoke test as the primary functional gate after equivalent production coverage is achieved.
