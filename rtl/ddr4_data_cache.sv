@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // 64-line direct-mapped data cache for the DDR4 controller read/write datapath.
 
+`timescale 1ns/1ps
+
 import ddr4_ctrl_pkg::*;
 
 module ddr4_data_cache #(
@@ -29,6 +31,7 @@ module ddr4_data_cache #(
 
   logic [CACHE_IDX_W-1:0] lookup_idx;
   logic [CACHE_IDX_W-1:0] write_idx;
+  integer i;
 
   assign lookup_idx  = lookup_addr[CACHE_IDX_W+1:2];
   assign write_idx   = write_addr[CACHE_IDX_W+1:2];
@@ -38,14 +41,14 @@ module ddr4_data_cache #(
 
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-      for (int i = 0; i < CACHE_LINES; i++) begin
+      for (i = 0; i < CACHE_LINES; i = i + 1) begin
         cache_valid[i] <= 1'b0;
         cache_data[i]  <= '0;
         cache_tag[i]   <= '0;
       end
     end else begin
       if (invalidate) begin
-        for (int i = 0; i < CACHE_LINES; i++) begin
+        for (i = 0; i < CACHE_LINES; i = i + 1) begin
           cache_valid[i] <= 1'b0;
         end
       end else if (write_valid) begin
