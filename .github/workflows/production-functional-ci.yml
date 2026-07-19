@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   production_functional_regression:
     name: Production DDR4 initialization regression
@@ -56,3 +60,33 @@ jobs:
             sim/build_production_tb/sim.log
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Publish production functional report
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          CI_STATUS: ${{ job.status }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        with:
+          script: |
+            const fs = require('fs');
+            const read = (path) => fs.existsSync(path) ? fs.readFileSync(path, 'utf8').slice(-12000) : '(not generated)';
+            const compileLog = read('sim/build_production_tb/compile.log');
+            const simLog = read('sim/build_production_tb/sim.log');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[Production Functional CI] ${process.env.CI_STATUS}: ${process.env.COMMIT_SHA.substring(0, 8)}`,
+              body: [
+                `Status: **${process.env.CI_STATUS}**`,
+                `Commit: \`${process.env.COMMIT_SHA}\``,
+                `Run: ${process.env.RUN_URL}`,
+                '',
+                '## Compile log',
+                '```text', compileLog, '```',
+                '',
+                '## Simulation log',
+                '```text', simLog, '```'
+              ].join('\n')
+            });
