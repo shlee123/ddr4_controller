@@ -40,10 +40,6 @@ module tb_ddr4_controller_m20;
   logic [31:0] cycles,busy_cycles,read_count,write_count,refresh_count,row_hit_count,latency_sum,max_queue_level;
   ddr4_perf_monitor #(.QUEUE_W(4)) u_perf(.clk,.rst_n,.req_accept(p_req),.rsp_complete(p_rsp),.cmd_rd(p_rd),.cmd_wr(p_wr),.cmd_ref(p_ref),.row_hit(p_hit),.queue_level(q_level),.cycles,.busy_cycles,.read_count,.write_count,.refresh_count,.row_hit_count,.latency_sum,.max_queue_level);
 
-  task automatic negedge_pulse(ref logic sig);
-    begin @(negedge clk); sig=1; @(negedge clk); sig=0; end
-  endtask
-
   integer i;
   initial begin
     b_start=0;b_accept=0;q_push=0;q_pop=0;q_in=0;
@@ -62,11 +58,13 @@ module tb_ddr4_controller_m20;
     end
     if(b_active || b_unsup) $fatal(1,"M11 burst completion failed");
 
-    for(i=0;i<3;i=i+1) begin q_in=64'h100+i; negedge_pulse(q_push); end
+    for(i=0;i<3;i=i+1) begin
+      q_in=64'h100+i; @(negedge clk); q_push=1; @(negedge clk); q_push=0;
+    end
     if(q_level!=3) $fatal(1,"M12 write buffer level=%0d",q_level);
     for(i=0;i<3;i=i+1) begin
       if(q_out!=64'h100+i) $fatal(1,"M13 read buffer order expected=%h got=%h",64'h100+i,q_out);
-      negedge_pulse(q_pop);
+      @(negedge clk); q_pop=1; @(negedge clk); q_pop=0;
     end
     if(!q_empty || q_ov || q_un) $fatal(1,"M12/M13 buffer flags invalid");
 
@@ -77,21 +75,32 @@ module tb_ddr4_controller_m20;
     if(!g_valid || g_index!=1 || !g_hit || !g_write || g_bank!=2) $fatal(1,"M14/M15 scheduler priority failed");
     @(negedge clk);g_accept=1;@(negedge clk);g_accept=0;req_valid=0;
 
-    same_bg=0; negedge_pulse(t_wr); while(!t_allow_rd) @(posedge clk); negedge_pulse(t_rd);
-    while(!t_allow_pre) @(posedge clk); negedge_pulse(t_pre);
-    while(!t_allow_mrs) @(posedge clk); negedge_pulse(t_mrs);
-    while(!t_allow_zq) @(posedge clk); negedge_pulse(t_zq);
+    same_bg=0;
+    @(negedge clk);t_wr=1;@(negedge clk);t_wr=0;
+    while(!t_allow_rd) @(posedge clk);
+    @(negedge clk);t_rd=1;@(negedge clk);t_rd=0;
+    while(!t_allow_pre) @(posedge clk);
+    @(negedge clk);t_pre=1;@(negedge clk);t_pre=0;
+    while(!t_allow_mrs) @(posedge clk);
+    @(negedge clk);t_mrs=1;@(negedge clk);t_mrs=0;
+    while(!t_allow_zq) @(posedge clk);
+    @(negedge clk);t_zq=1;@(negedge clk);t_zq=0;
     if(t_violation) $fatal(1,"M16 legal timing sequence violated");
 
-    cfg_idx=3;cfg_data=17'h15555;negedge_pulse(cfg_we);#1;
+    cfg_idx=3;cfg_data=17'h15555;@(negedge clk);cfg_we=1;@(negedge clk);cfg_we=0;#1;
     if(mr[3]!=17'h15555) $fatal(1,"M17 MR programming failed");
 
-    negedge_pulse(pd_enter);if(!power_down)$fatal(1,"M18 power-down failed");
-    negedge_pulse(wake);if(power_down)$fatal(1,"M18 wake failed");
-    negedge_pulse(sr_enter);if(!self_refresh)$fatal(1,"M18 self-refresh failed");
-    negedge_pulse(wake);if(self_refresh)$fatal(1,"M18 self-refresh exit failed");
+    @(negedge clk);pd_enter=1;@(negedge clk);pd_enter=0;
+    if(!power_down)$fatal(1,"M18 power-down failed");
+    @(negedge clk);wake=1;@(negedge clk);wake=0;
+    if(power_down)$fatal(1,"M18 wake failed");
+    @(negedge clk);sr_enter=1;@(negedge clk);sr_enter=0;
+    if(!self_refresh)$fatal(1,"M18 self-refresh failed");
+    @(negedge clk);wake=1;@(negedge clk);wake=0;
+    if(self_refresh)$fatal(1,"M18 self-refresh exit failed");
 
-    data_in=32'hdeadbeef;crc_in=0;inject_error=1;negedge_pulse(data_valid);#1;
+    data_in=32'hdeadbeef;crc_in=0;inject_error=1;
+    @(negedge clk);data_valid=1;@(negedge clk);data_valid=0;#1;
     if(!poison) $fatal(1,"M19 poison missing");
     inject_error=0;
 
