@@ -1,0 +1,15 @@
++incdir+../../rtl/pkg
+../../rtl/pkg/ddr4_ctrl_pkg.sv
+../../rtl/sync_fifo.sv
+../../rtl/async_fifo.sv
+../../rtl/ddr4_data_cache.sv
+../../rtl/core/ddr4_scheduler_v2.sv
+../../rtl/core/ddr4_timing_ext.sv
+../../rtl/core/ddr4_native_request_mux.sv
+../../rtl/ddr4_scheduler.sv
+../../rtl/phy/ddr4_fpga_clockgen.sv
+../../rtl/phy/ddr4_ck_out.sv
+../../rtl/phy/ddr4_dq_dqs_phy.sv
+../../rtl/ddr4_controller_top.sv
+../../sim/model/ddr4_sdram_model.sv
+../../sim/tb/production/tb_ddr4_controller_m22.sv
