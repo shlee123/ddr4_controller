@@ -1,0 +1,117 @@
+name: M5 AXI Backpressure Regression
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  m5_axi_backpressure:
+    name: M5 AXI randomized backpressure scoreboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+
+      - name: Compile M5 regression
+        working-directory: sim
+        run: |
+          rm -rf build_m5
+          mkdir -p build_m5
+          cd build_m5
+          set -o pipefail
+          iverilog -g2012 -Wall -Wimplicit \
+            -s tb_ddr4_controller_m5 \
+            -o m5_tb \
+            -f ../filelist/m5_tb.f \
+            2>&1 | tee compile.log
+
+      - name: Run M5 regression
+        working-directory: sim/build_m5
+        run: |
+          set -o pipefail
+          vvp m5_tb 2>&1 | tee sim.log
+          grep -q "PASS M5 AXI backpressure randomized regression" sim.log
+
+      - name: Print logs
+        if: always()
+        run: |
+          test ! -f sim/build_m5/compile.log || cat sim/build_m5/compile.log
+          test ! -f sim/build_m5/sim.log || cat sim/build_m5/sim.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m5-axi-backpressure-${{ github.run_id }}
+          path: |
+            sim/build_m5/compile.log
+            sim/build_m5/sim.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Maintain M5 CI failure issue
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          CI_STATUS: ${{ job.status }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        with:
+          script: |
+            const fs = require('fs');
+            const issueTitle = '[M5 AXI CI] active failure';
+            const {data: issues} = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+            const existing = issues.find(issue => !issue.pull_request && issue.title === issueTitle);
+
+            if (process.env.CI_STATUS === 'success') {
+              if (existing) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  state: 'closed',
+                  state_reason: 'completed'
+                });
+              }
+              return;
+            }
+
+            const tail = p => fs.existsSync(p) ? fs.readFileSync(p, 'utf8').slice(-12000) : '(not generated)';
+            const body = [
+              'Status: **failure**',
+              `Commit: ${process.env.COMMIT_SHA}`,
+              `Run: ${process.env.RUN_URL}`,
+              '', '## Compile log', '```text', tail('sim/build_m5/compile.log'), '```',
+              '', '## Simulation log', '```text', tail('sim/build_m5/sim.log'), '```'
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body
+              });
+            }
