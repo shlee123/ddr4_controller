@@ -53,6 +53,16 @@ module tb_ddr4_controller_m4;
     end
   endtask
 
+  task automatic wait_b(input logic [31:0] addr);
+    integer n;
+    begin
+      n=0; while (!s_axi_bvalid && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
+      if (!s_axi_bvalid) $fatal(1,"B timeout addr=%h",addr);
+      if (s_axi_bresp!==2'b00) $fatal(1,"BRESP error addr=%h resp=%b",addr,s_axi_bresp);
+      @(posedge axi_clk);
+    end
+  endtask
+
   task automatic axi_write(input logic [31:0] addr,input logic [31:0] data);
     integer n;
     begin
@@ -65,10 +75,24 @@ module tb_ddr4_controller_m4;
       n=0; while (!s_axi_wready && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
       if (!s_axi_wready) $fatal(1,"W timeout addr=%h",addr);
       @(posedge axi_clk); s_axi_wvalid<=0; s_axi_wlast<=0;
-      n=0; while (!s_axi_bvalid && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
-      if (!s_axi_bvalid) $fatal(1,"B timeout addr=%h",addr);
-      if (s_axi_bresp!==2'b00) $fatal(1,"BRESP error addr=%h resp=%b",addr,s_axi_bresp);
+      wait_b(addr);
+    end
+  endtask
+
+  task automatic axi_write_w_before_aw(input logic [31:0] addr,input logic [31:0] data);
+    integer n;
+    begin
       @(posedge axi_clk);
+      s_axi_wdata<=data; s_axi_wstrb<=4'hf; s_axi_wlast<=1; s_axi_wvalid<=1;
+      n=0; while (!s_axi_wready && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
+      if (!s_axi_wready) $fatal(1,"M21 W-before-AW W timeout addr=%h",addr);
+      @(posedge axi_clk); s_axi_wvalid<=0; s_axi_wlast<=0;
+      repeat(3) @(posedge axi_clk);
+      s_axi_awaddr<=addr; s_axi_awlen<=0; s_axi_awsize<=3'd2; s_axi_awburst<=2'b01; s_axi_awvalid<=1;
+      n=0; while (!s_axi_awready && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
+      if (!s_axi_awready) $fatal(1,"M21 W-before-AW AW timeout addr=%h",addr);
+      @(posedge axi_clk); s_axi_awvalid<=0;
+      wait_b(addr);
     end
   endtask
 
@@ -90,7 +114,7 @@ module tb_ddr4_controller_m4;
   endtask
 
   logic [31:0] status,rd;
-  logic [31:0] sb_addr[0:3],sb_data[0:3];
+  logic [31:0] sb_addr[0:4],sb_data[0:4];
   integer i,n;
   initial begin
     s_axi_awaddr='0;s_axi_awlen=0;s_axi_awsize=2;s_axi_awburst=1;s_axi_awvalid=0;
@@ -101,19 +125,22 @@ module tb_ddr4_controller_m4;
     sb_addr[1]=32'h0000_0204; sb_data[1]=32'ha5a5_5a5a;
     sb_addr[2]=32'h0001_0308; sb_data[2]=32'hdead_beef;
     sb_addr[3]=32'h0080_040c; sb_data[3]=32'hc001_d00d;
+    sb_addr[4]=32'h0000_0510; sb_data[4]=32'h21a0_0a21;
     repeat(8) @(posedge axi_clk); axi_rst_n=1;
     repeat(8) @(posedge ddr_clk); ddr_rst_n=1;
     status=0;n=0;
     while(!status[0] && n<TIMEOUT) begin apb_read(REG_STATUS,status); n=n+1; end
     if(!status[0]) $fatal(1,"init_done timeout");
     for(i=0;i<4;i=i+1) axi_write(sb_addr[i],sb_data[i]);
-    for(i=0;i<4;i=i+1) begin
+    axi_write_w_before_aw(sb_addr[4],sb_data[4]);
+    for(i=0;i<5;i=i+1) begin
       axi_read(sb_addr[i],rd);
       if(rd!==sb_data[i]) $fatal(1,"Scoreboard mismatch addr=%h expected=%h actual=%h",sb_addr[i],sb_data[i],rd);
     end
-    $display("PASS M4 AXI single read/write scoreboard: transactions=%0d",8);
+    $display("PASS M4 AXI single read/write scoreboard: transactions=%0d",10);
+    $display("PASS M21 independent AW/W transaction assembly");
     $finish;
   end
 
-  initial begin #250000; $fatal(1,"M4 global timeout"); end
+  initial begin #300000; $fatal(1,"M4 global timeout"); end
 endmodule
