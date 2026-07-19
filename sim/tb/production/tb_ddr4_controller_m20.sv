@@ -40,7 +40,7 @@ module tb_ddr4_controller_m20;
   logic [31:0] cycles,busy_cycles,read_count,write_count,refresh_count,row_hit_count,latency_sum,max_queue_level;
   ddr4_perf_monitor #(.QUEUE_W(4)) u_perf(.clk,.rst_n,.req_accept(p_req),.rsp_complete(p_rsp),.cmd_rd(p_rd),.cmd_wr(p_wr),.cmd_ref(p_ref),.row_hit(p_hit),.queue_level(q_level),.cycles,.busy_cycles,.read_count,.write_count,.refresh_count,.row_hit_count,.latency_sum,.max_queue_level);
 
-  task automatic negedge_pulse(inout logic sig);
+  task automatic negedge_pulse(ref logic sig);
     begin @(negedge clk); sig=1; @(negedge clk); sig=0; end
   endtask
 
