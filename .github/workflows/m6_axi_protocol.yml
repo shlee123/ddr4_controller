@@ -49,6 +49,7 @@ jobs:
             sim/build_m6/sim.log
           if-no-files-found: warn
           retention-days: 14
+      # Maintain one actionable issue rather than one issue per run.
       - name: Maintain M6 CI failure issue
         if: always() && github.event_name != 'pull_request'
         uses: actions/github-script@v7
