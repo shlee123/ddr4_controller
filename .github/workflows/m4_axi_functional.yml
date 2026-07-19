@@ -49,8 +49,6 @@ jobs:
             sim/build_m4/sim.log
           if-no-files-found: warn
           retention-days: 14
-      # Keep at most one open issue for the current M4 failure.
-      # A later successful run closes that issue automatically.
       - name: Maintain M4 CI failure issue
         if: always() && github.event_name != 'pull_request'
         uses: actions/github-script@v7
@@ -71,6 +69,17 @@ jobs:
             const existing = issues.find(issue => !issue.pull_request && issue.title === issueTitle);
 
             if (process.env.CI_STATUS === 'success') {
+              const legacyPattern = /^\[(M4 AXI CI|Icarus CI|Production Functional CI)\] (success|failure):/;
+              const staleReports = issues.filter(issue => !issue.pull_request && legacyPattern.test(issue.title));
+              for (const issue of staleReports) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                  state_reason: 'completed'
+                });
+              }
               if (existing) {
                 await github.rest.issues.update({
                   owner: context.repo.owner,
