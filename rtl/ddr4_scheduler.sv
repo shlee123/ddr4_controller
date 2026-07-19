@@ -93,6 +93,7 @@ module ddr4_scheduler #(
   ddr_req_t cur_req;
   ddr_req_t pending_req;
   logic     pending_valid;
+  logic     rsp_valid;
   logic [DDR_ROW_W-1:0] cur_row;
 
   localparam int MR_ADDR_COPY_W = (DDR_ADDR_W < 17) ? DDR_ADDR_W : 17;
@@ -147,7 +148,7 @@ module ddr4_scheduler #(
   always_comb begin
     rd_req_rd = 1'b0;
     wr_req_rd = 1'b0;
-    rsp_wr    = 1'b0;
+    rsp_wr    = rsp_valid && !rsp_full;
 
     if (can_prefetch) begin
       if (!rd_req_empty) begin
@@ -155,10 +156,6 @@ module ddr4_scheduler #(
       end else if (!wr_req_empty) begin
         wr_req_rd = 1'b1;
       end
-    end
-
-    if (state == APP_RESP && !rsp_full) begin
-      rsp_wr = 1'b1;
     end
   end
 
@@ -189,6 +186,7 @@ module ddr4_scheduler #(
       cur_req           <= '0;
       pending_req       <= '0;
       pending_valid     <= 1'b0;
+      rsp_valid         <= 1'b0;
       rsp_data          <= '0;
       cache_write_valid <= 1'b0;
       cache_write_addr  <= '0;
@@ -265,7 +263,7 @@ module ddr4_scheduler #(
         end
 
         APP_IDLE: begin
-          if (pending_valid && !rsp_full) begin
+          if (pending_valid && !rsp_valid) begin
             cur_req       <= pending_req;
             pending_valid <= 1'b0;
             state         <= APP_ACT;
@@ -342,13 +340,18 @@ module ddr4_scheduler #(
           state    <= APP_TRP;
         end
         APP_TRP: if (wait_cnt == 0) state <= APP_RESP;
-        APP_RESP: if (!rsp_full) begin
-          rsp_data.wr    <= cur_req.wr;
-          rsp_data.addr  <= cur_req.addr;
-          rsp_data.rdata <= cur_req.wr ? '0 : cache_lookup_data;
-          rsp_data.resp  <= 2'b00;
-          rsp_data.last  <= 1'b1;
-          state          <= APP_IDLE;
+        APP_RESP: begin
+          if (!rsp_valid) begin
+            rsp_data.wr    <= cur_req.wr;
+            rsp_data.addr  <= cur_req.addr;
+            rsp_data.rdata <= cur_req.wr ? '0 : cache_lookup_data;
+            rsp_data.resp  <= 2'b00;
+            rsp_data.last  <= 1'b1;
+            rsp_valid      <= 1'b1;
+          end else if (!rsp_full) begin
+            rsp_valid <= 1'b0;
+            state     <= APP_IDLE;
+          end
         end
         default: state <= INIT_RESET;
       endcase
