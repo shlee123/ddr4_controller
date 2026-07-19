@@ -97,7 +97,10 @@ module ddr4_timing_refresh_guard #(
         if (act_age[i] != 0) act_age[i] <= act_age[i] - 1'b1;
 
       if (issue_act) begin
-        if (!allow_act) violation <= 1'b1;
+        if (!allow_act) begin
+          violation <= 1'b1;
+          $display("M7_VIOLATION ACT bank=%0d rrd=%0d act_count=%0d rp=%0d rc=%0d refresh=%0b rfc=%0d", issue_bank, rrd_cnt, act_count, rp_cnt[issue_bank], rc_cnt[issue_bank], refresh_pending, rfc_cnt);
+        end
         rcd_cnt[issue_bank] <= T_RCD_CK;
         ras_cnt[issue_bank] <= T_RAS_CK;
         rc_cnt[issue_bank]  <= T_RC_CK;
@@ -108,11 +111,17 @@ module ddr4_timing_refresh_guard #(
         else if (act_age[3] == 0) act_age[3] <= T_FAW_CK;
       end
       if (issue_pre) begin
-        if (!allow_pre) violation <= 1'b1;
+        if (!allow_pre) begin
+          violation <= 1'b1;
+          $display("M7_VIOLATION PRE bank=%0d ras=%0d refresh=%0b rfc=%0d", issue_bank, ras_cnt[issue_bank], refresh_pending, rfc_cnt);
+        end
         rp_cnt[issue_bank] <= T_RP_CK;
       end
       if (issue_rd || issue_wr) begin
-        if (!allow_col) violation <= 1'b1;
+        if (!allow_col) begin
+          violation <= 1'b1;
+          $display("M7_VIOLATION COL bank=%0d rcd=%0d ccd=%0d refresh=%0b rfc=%0d", issue_bank, rcd_cnt[issue_bank], ccd_cnt, refresh_pending, rfc_cnt);
+        end
         ccd_cnt <= T_CCD_CK;
       end
     end
