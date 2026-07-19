@@ -62,7 +62,6 @@ module ddr4_controller_top #(
   localparam int AWF_W=AXI_ADDR_W+8+3+2;
   localparam int REQ_W=$bits(ddr_req_t);
   localparam int RSP_W=$bits(ddr_rsp_t);
-
   typedef struct packed {logic [AXI_ADDR_W-1:0] addr; logic [7:0] len; logic [2:0] size; logic [1:0] burst;} axi_addr_chan_t;
 
   logic init_done,init_start_axi,init_start_ddr;
@@ -140,12 +139,11 @@ module ddr4_controller_top #(
   logic native_wr_empty,native_rd_empty,native_grant_valid,native_grant_write,native_row_hit,native_timing_violation;
   logic rsp_wr,rsp_rd,rsp_full,rsp_afull,rsp_empty;
   always_comb begin
-    wr_req_in='{wr:1'b1,addr:aw_out.addr,wdata:s_axi_wdata,wstrb:s_axi_wstrb,len:aw_out.len,size:aw_out.size,burst:aw_out.burst};
-    rd_req_in='{wr:1'b0,addr:ar_out.addr,wdata:'0,wstrb:'0,len:ar_out.len,size:ar_out.size,burst:ar_out.burst};
+    wr_req_in={1'b1,aw_out.addr,s_axi_wdata,s_axi_wstrb,aw_out.len,aw_out.size,aw_out.burst};
+    rd_req_in={1'b0,ar_out.addr,{AXI_DATA_W{1'b0}},{AXI_DATA_W/8{1'b0}},ar_out.len,ar_out.size,ar_out.burst};
   end
   assign s_axi_wready=!awf_empty&&!wr_req_full; assign wr_req_wr=s_axi_wvalid&&s_axi_wready; assign awf_rd=wr_req_wr;
   assign rd_req_wr=!arf_empty&&!rd_req_full; assign arf_rd=rd_req_wr;
-
   async_fifo #(.WIDTH(REQ_W),.DEPTH(REQ_FIFO_DEPTH)) u_wr_req_fifo(.wr_clk(axi_clk),.wr_rst_n(axi_rst_n),.wr_en(wr_req_wr),.wr_data(wr_req_in),.wr_full(wr_req_full),.wr_almost_full(wr_req_afull),.rd_clk(clk),.rd_rst_n(rst_n),.rd_en(wr_fifo_pop),.rd_data(wr_req_fifo),.rd_empty(wr_req_empty));
   async_fifo #(.WIDTH(REQ_W),.DEPTH(REQ_FIFO_DEPTH)) u_rd_req_fifo(.wr_clk(axi_clk),.wr_rst_n(axi_rst_n),.wr_en(rd_req_wr),.wr_data(rd_req_in),.wr_full(rd_req_full),.wr_almost_full(rd_req_afull),.rd_clk(clk),.rd_rst_n(rst_n),.rd_en(rd_fifo_pop),.rd_data(rd_req_fifo),.rd_empty(rd_req_empty));
 
@@ -180,7 +178,6 @@ module ddr4_controller_top #(
   assign ddr_dm_n=ddr_dm_oe?ddr_dm_n_out:{DDR_DM_W{1'bz}}; assign ddr_dq_in=ddr_dq;
   ddr4_ck_out u_ddr_ck_out(.clk,.ck_t(ddr_ck_t),.ck_c(ddr_ck_c));
   ddr4_data_cache #(.AXI_ADDR_W(AXI_ADDR_W),.AXI_DATA_W(AXI_DATA_W),.CACHE_LINES(CACHE_LINES)) u_data_cache(.clk,.rst_n,.lookup_addr(cache_lookup_addr),.lookup_hit(cache_hit),.lookup_data(cache_lookup_data),.write_valid(cache_write_valid),.write_addr(cache_write_addr),.write_data(cache_write_data),.invalidate(1'b0));
-
   ddr4_scheduler #(.AXI_ADDR_W(AXI_ADDR_W),.AXI_DATA_W(AXI_DATA_W),.DDR_ADDR_W(DDR_ADDR_W),.DDR_BG_W(DDR_BG_W),.DDR_BA_W(DDR_BA_W),.DDR_DQ_W(DDR_DQ_W),.DDR_DM_W(DDR_DM_W)) u_scheduler(
     .clk,.rst_n,.init_start(init_start_ddr),.init_done,.mr(mr_ddr),
     .wr_req_data(wr_req_native),.wr_req_empty(native_wr_empty),.wr_req_rd,
