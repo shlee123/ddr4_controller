@@ -16,6 +16,7 @@ package ddr4_ctrl_pkg;
   parameter int DDR_CLK_MHZ  = 500;
 
   parameter int AXI_AW_FIFO_DEPTH = 8;
+  parameter int AXI_W_FIFO_DEPTH  = 8;
   parameter int AXI_AR_FIFO_DEPTH = 8;
   parameter int REQ_FIFO_DEPTH    = 16;
   parameter int RSP_FIFO_DEPTH    = 16;
