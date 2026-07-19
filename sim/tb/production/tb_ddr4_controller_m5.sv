@@ -87,6 +87,7 @@ module tb_ddr4_controller_m5;
   );
 
   logic random_ready_enable;
+  logic forced_bready, forced_rready;
   logic [31:0] ready_lfsr;
   always_ff @(posedge axi_clk or negedge axi_rst_n) begin
     if (!axi_rst_n) begin
@@ -97,6 +98,9 @@ module tb_ddr4_controller_m5;
       ready_lfsr <= {ready_lfsr[30:0], ready_lfsr[31] ^ ready_lfsr[21] ^ ready_lfsr[1] ^ ready_lfsr[0]};
       s_axi_bready <= ready_lfsr[0] | ready_lfsr[3] | ready_lfsr[7];
       s_axi_rready <= ready_lfsr[1] | ready_lfsr[4] | ready_lfsr[8];
+    end else begin
+      s_axi_bready <= forced_bready;
+      s_axi_rready <= forced_rready;
     end
   end
 
@@ -105,15 +109,14 @@ module tb_ddr4_controller_m5;
   logic [1:0] stalled_rresp;
   logic stalled_rlast;
   logic b_stalled, r_stalled;
-  always_ff @(posedge axi_clk or negedge axi_rst_n) begin
+  always @(posedge axi_clk or negedge axi_rst_n) begin
     if (!axi_rst_n) begin
       b_stalled <= 1'b0;
       r_stalled <= 1'b0;
     end else begin
       if (s_axi_bvalid && !s_axi_bready) begin
         if (!b_stalled) stalled_bresp <= s_axi_bresp;
-        else if (!s_axi_bvalid || s_axi_bresp !== stalled_bresp)
-          $fatal(1, "B channel changed while stalled");
+        else if (s_axi_bresp !== stalled_bresp) $fatal(1, "B channel changed while stalled");
         b_stalled <= 1'b1;
       end else begin
         b_stalled <= 1'b0;
@@ -124,8 +127,8 @@ module tb_ddr4_controller_m5;
           stalled_rdata <= s_axi_rdata;
           stalled_rresp <= s_axi_rresp;
           stalled_rlast <= s_axi_rlast;
-        end else if (!s_axi_rvalid || s_axi_rdata !== stalled_rdata ||
-                     s_axi_rresp !== stalled_rresp || s_axi_rlast !== stalled_rlast) begin
+        end else if (s_axi_rdata !== stalled_rdata || s_axi_rresp !== stalled_rresp ||
+                     s_axi_rlast !== stalled_rlast) begin
           $fatal(1, "R channel changed while stalled");
         end
         r_stalled <= 1'b1;
@@ -192,6 +195,7 @@ module tb_ddr4_controller_m5;
     integer n;
     begin
       n = 0;
+      @(posedge axi_clk);
       while (!(s_axi_bvalid && s_axi_bready) && n < TIMEOUT) begin @(posedge axi_clk); n = n + 1; end
       if (!(s_axi_bvalid && s_axi_bready)) $fatal(1, "B timeout");
       if (s_axi_bresp !== 2'b00) $fatal(1, "BRESP error %b", s_axi_bresp);
@@ -227,6 +231,7 @@ module tb_ddr4_controller_m5;
     integer n;
     begin
       n = 0;
+      @(posedge axi_clk);
       while (!(s_axi_rvalid && s_axi_rready) && n < TIMEOUT) begin @(posedge axi_clk); n = n + 1; end
       if (!(s_axi_rvalid && s_axi_rready)) $fatal(1, "R timeout");
       if (s_axi_rresp !== 2'b00) $fatal(1, "RRESP error %b", s_axi_rresp);
@@ -253,6 +258,8 @@ module tb_ddr4_controller_m5;
     s_axi_araddr = '0; s_axi_arlen = 0; s_axi_arsize = 2; s_axi_arburst = 1; s_axi_arvalid = 0;
     paddr = '0; psel = 0; penable = 0; pwrite = 0; pwdata = '0;
     random_ready_enable = 1'b0;
+    forced_bready = 1'b0;
+    forced_rready = 1'b0;
     writes = 0; reads = 0; transactions = 0;
 
     repeat (8) @(posedge axi_clk);
@@ -264,7 +271,6 @@ module tb_ddr4_controller_m5;
     while (!status[0] && n < TIMEOUT) begin apb_read(REG_STATUS, status); n = n + 1; end
     if (!status[0]) $fatal(1, "init_done timeout");
 
-    // Fill the scoreboard so every subsequent random read is defined.
     random_ready_enable = 1'b1;
     for (i = 0; i < WORDS; i = i + 1) begin
       data = 32'h5a00_0000 ^ i;
@@ -274,9 +280,10 @@ module tb_ddr4_controller_m5;
       transactions = transactions + 1;
     end
 
-    // Queue-boundary write stress: hold BREADY low while eight writes are accepted.
     random_ready_enable = 1'b0;
-    @(posedge axi_clk); s_axi_bready <= 1'b0; s_axi_rready <= 1'b0;
+    forced_bready = 1'b0;
+    forced_rready = 1'b0;
+    repeat (2) @(posedge axi_clk);
     for (i = 0; i < QUEUE_BURST; i = i + 1) begin
       data = 32'ha500_1000 + i;
       send_aw(word_addr(i));
@@ -286,14 +293,14 @@ module tb_ddr4_controller_m5;
       transactions = transactions + 1;
     end
     repeat (20) @(posedge axi_clk);
-    s_axi_bready <= 1'b1;
+    forced_bready = 1'b1;
     for (i = 0; i < QUEUE_BURST; i = i + 1) wait_b();
 
-    // Queue-boundary read stress: hold RREADY low while eight reads are accepted.
-    s_axi_rready <= 1'b0;
+    forced_rready = 1'b0;
+    repeat (2) @(posedge axi_clk);
     for (i = 0; i < QUEUE_BURST; i = i + 1) send_ar(word_addr(i));
     repeat (20) @(posedge axi_clk);
-    s_axi_rready <= 1'b1;
+    forced_rready = 1'b1;
     for (i = 0; i < QUEUE_BURST; i = i + 1) begin
       wait_r(rd);
       if (rd !== scoreboard[i])
