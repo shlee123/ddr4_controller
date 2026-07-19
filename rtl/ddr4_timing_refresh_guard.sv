@@ -28,7 +28,6 @@ module ddr4_timing_refresh_guard #(
   output logic allow_col,
   output logic violation
 );
-  localparam int BW = (BANKS <= 2) ? 1 : $clog2(BANKS);
   integer i;
   logic [$clog2(T_REFI_CK+1)-1:0] refi_cnt;
   logic [$clog2(T_RFC_CK+1)-1:0]  rfc_cnt;
@@ -40,6 +39,12 @@ module ddr4_timing_refresh_guard #(
   logic [$clog2(T_RP_CK+1)-1:0]  rp_cnt  [0:BANKS-1];
   logic [$clog2(T_RAS_CK+1)-1:0] ras_cnt [0:BANKS-1];
   logic [$clog2(T_RC_CK+1)-1:0]  rc_cnt  [0:BANKS-1];
+
+  always_comb begin
+    act_count = 0;
+    for (i = 0; i < 4; i = i + 1)
+      if (act_age[i] != 0) act_count = act_count + 1'b1;
+  end
 
   assign refresh_block = (rfc_cnt != 0);
   assign allow_act = !refresh_pending && !refresh_block &&
@@ -58,7 +63,6 @@ module ddr4_timing_refresh_guard #(
       rrd_cnt         <= '0;
       refresh_pending <= 1'b0;
       violation       <= 1'b0;
-      act_count       <= '0;
       for (i = 0; i < BANKS; i = i + 1) begin
         rcd_cnt[i] <= '0;
         rp_cnt[i]  <= '0;
@@ -75,7 +79,6 @@ module ddr4_timing_refresh_guard #(
       end
 
       if (refresh_ack) begin
-        if (!refresh_pending || refresh_block) violation <= 1'b1;
         refresh_pending <= 1'b0;
         rfc_cnt <= T_RFC_CK;
       end else if (rfc_cnt != 0) begin
@@ -90,14 +93,8 @@ module ddr4_timing_refresh_guard #(
         if (ras_cnt[i] != 0) ras_cnt[i] <= ras_cnt[i] - 1'b1;
         if (rc_cnt[i]  != 0) rc_cnt[i]  <= rc_cnt[i]  - 1'b1;
       end
-
-      act_count <= '0;
-      for (i = 0; i < 4; i = i + 1) begin
-        if (act_age[i] != 0) begin
-          act_age[i] <= act_age[i] - 1'b1;
-          act_count <= act_count + 1'b1;
-        end
-      end
+      for (i = 0; i < 4; i = i + 1)
+        if (act_age[i] != 0) act_age[i] <= act_age[i] - 1'b1;
 
       if (issue_act) begin
         if (!allow_act) violation <= 1'b1;
