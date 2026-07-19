@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// DDR4 controller top-level, Version 2.3.
-// AXI/APB front-end plus native DDR request arbitration and timing admission.
+// DDR4 controller top-level, Version 2.4.
+// AXI/APB front-end plus independent AW/W/AR buffering, native DDR arbitration and timing admission.
 
 `timescale 1ns/1ps
 
@@ -60,9 +60,11 @@ module ddr4_controller_top #(
   localparam logic [APB_ADDR_W-1:0] REG_MR0='h20, REG_MR1='h24, REG_MR2='h28, REG_MR3='h2c;
   localparam logic [APB_ADDR_W-1:0] REG_MR4='h30, REG_MR5='h34, REG_MR6='h38;
   localparam int AWF_W=AXI_ADDR_W+8+3+2;
+  localparam int WF_W=AXI_DATA_W+(AXI_DATA_W/8)+1;
   localparam int REQ_W=$bits(ddr_req_t);
   localparam int RSP_W=$bits(ddr_rsp_t);
   typedef struct packed {logic [AXI_ADDR_W-1:0] addr; logic [7:0] len; logic [2:0] size; logic [1:0] burst;} axi_addr_chan_t;
+  typedef struct packed {logic [AXI_DATA_W-1:0] data; logic [AXI_DATA_W/8-1:0] strb; logic last;} axi_w_chan_t;
 
   logic init_done,init_start_axi,init_start_ddr;
   logic [16:0] mr_axi[0:6],mr_ddr[0:6];
@@ -91,11 +93,15 @@ module ddr4_controller_top #(
     REG_MR0:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[0]};REG_MR1:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[1]};REG_MR2:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[2]};REG_MR3:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[3]};REG_MR4:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[4]};REG_MR5:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[5]};REG_MR6:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[6]};default:prdata='0;endcase end
 
   axi_addr_chan_t aw_in,aw_out,ar_in,ar_out;
-  always_comb begin aw_in.addr=s_axi_awaddr;aw_in.len=s_axi_awlen;aw_in.size=s_axi_awsize;aw_in.burst=s_axi_awburst;ar_in.addr=s_axi_araddr;ar_in.len=s_axi_arlen;ar_in.size=s_axi_arsize;ar_in.burst=s_axi_arburst;end
-  logic awf_wr,awf_rd,awf_full,awf_empty,arf_wr,arf_rd,arf_full,arf_empty;
+  axi_w_chan_t w_in,w_out;
+  always_comb begin aw_in.addr=s_axi_awaddr;aw_in.len=s_axi_awlen;aw_in.size=s_axi_awsize;aw_in.burst=s_axi_awburst;ar_in.addr=s_axi_araddr;ar_in.len=s_axi_arlen;ar_in.size=s_axi_arsize;ar_in.burst=s_axi_arburst;w_in.data=s_axi_wdata;w_in.strb=s_axi_wstrb;w_in.last=s_axi_wlast;end
+  logic awf_wr,awf_rd,awf_full,awf_empty,wf_wr,wf_rd,wf_full,wf_empty,arf_wr,arf_rd,arf_full,arf_empty;
   sync_fifo #(.WIDTH(AWF_W),.DEPTH(AXI_AW_FIFO_DEPTH)) u_aw_fifo(.clk(axi_clk),.rst_n(axi_rst_n),.wr_en(awf_wr),.wr_data(aw_in),.full(awf_full),.rd_en(awf_rd),.rd_data(aw_out),.empty(awf_empty));
+  sync_fifo #(.WIDTH(WF_W),.DEPTH(AXI_W_FIFO_DEPTH)) u_w_fifo(.clk(axi_clk),.rst_n(axi_rst_n),.wr_en(wf_wr),.wr_data(w_in),.full(wf_full),.rd_en(wf_rd),.rd_data(w_out),.empty(wf_empty));
   sync_fifo #(.WIDTH(AWF_W),.DEPTH(AXI_AR_FIFO_DEPTH)) u_ar_fifo(.clk(axi_clk),.rst_n(axi_rst_n),.wr_en(arf_wr),.wr_data(ar_in),.full(arf_full),.rd_en(arf_rd),.rd_data(ar_out),.empty(arf_empty));
-  assign s_axi_awready=!awf_full;assign awf_wr=s_axi_awvalid&&s_axi_awready;assign s_axi_arready=!arf_full;assign arf_wr=s_axi_arvalid&&s_axi_arready;
+  assign s_axi_awready=!awf_full;assign awf_wr=s_axi_awvalid&&s_axi_awready;
+  assign s_axi_wready=!wf_full;assign wf_wr=s_axi_wvalid&&s_axi_wready;
+  assign s_axi_arready=!arf_full;assign arf_wr=s_axi_arvalid&&s_axi_arready;
 
   ddr_req_t wr_req_in,rd_req_in,wr_req_fifo,rd_req_fifo,wr_req_native,rd_req_native;
   ddr_rsp_t rsp_in,rsp_out,rsp_hold;
@@ -103,8 +109,10 @@ module ddr4_controller_top #(
   logic wr_req_full,rd_req_full,wr_req_afull,rd_req_afull,wr_req_empty,rd_req_empty;
   logic native_wr_empty,native_rd_empty,native_grant_valid,native_grant_write,native_row_hit,native_timing_violation;
   logic rsp_wr,rsp_rd,rsp_full,rsp_afull,rsp_empty;
-  always_comb begin wr_req_in={1'b1,aw_out.addr,s_axi_wdata,s_axi_wstrb,aw_out.len,aw_out.size,aw_out.burst};rd_req_in={1'b0,ar_out.addr,{AXI_DATA_W{1'b0}},{AXI_DATA_W/8{1'b0}},ar_out.len,ar_out.size,ar_out.burst};end
-  assign s_axi_wready=!awf_empty&&!wr_req_full;assign wr_req_wr=s_axi_wvalid&&s_axi_wready;assign awf_rd=wr_req_wr;assign rd_req_wr=!arf_empty&&!rd_req_full;assign arf_rd=rd_req_wr;
+  always_comb begin wr_req_in={1'b1,aw_out.addr,w_out.data,w_out.strb,aw_out.len,aw_out.size,aw_out.burst};rd_req_in={1'b0,ar_out.addr,{AXI_DATA_W{1'b0}},{AXI_DATA_W/8{1'b0}},ar_out.len,ar_out.size,ar_out.burst};end
+  assign wr_req_wr=!awf_empty&&!wf_empty&&!wr_req_full;
+  assign awf_rd=wr_req_wr;assign wf_rd=wr_req_wr;
+  assign rd_req_wr=!arf_empty&&!rd_req_full;assign arf_rd=rd_req_wr;
   async_fifo #(.WIDTH(REQ_W),.DEPTH(REQ_FIFO_DEPTH)) u_wr_req_fifo(.wr_clk(axi_clk),.wr_rst_n(axi_rst_n),.wr_en(wr_req_wr),.wr_data(wr_req_in),.wr_full(wr_req_full),.wr_almost_full(wr_req_afull),.rd_clk(clk),.rd_rst_n(rst_n),.rd_en(wr_fifo_pop),.rd_data(wr_req_fifo),.rd_empty(wr_req_empty));
   async_fifo #(.WIDTH(REQ_W),.DEPTH(REQ_FIFO_DEPTH)) u_rd_req_fifo(.wr_clk(axi_clk),.wr_rst_n(axi_rst_n),.wr_en(rd_req_wr),.wr_data(rd_req_in),.wr_full(rd_req_full),.wr_almost_full(rd_req_afull),.rd_clk(clk),.rd_rst_n(rst_n),.rd_en(rd_fifo_pop),.rd_data(rd_req_fifo),.rd_empty(rd_req_empty));
   ddr4_native_request_mux #(.AXI_ADDR_W(AXI_ADDR_W),.REQ_W(REQ_W)) u_native_request_mux(
