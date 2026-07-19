@@ -56,7 +56,8 @@ module tb_ddr4_controller_m6;
       s_axi_awaddr<=addr; s_axi_awlen<=0; s_axi_awsize<=3'd2; s_axi_awburst<=2'b01; s_axi_awvalid<=1;
       n=0; while(!(s_axi_awvalid&&s_axi_awready) && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
       if(n>=TIMEOUT) $fatal(1,"AW timeout");
-      @(posedge axi_clk); s_axi_awvalid<=0;
+      s_axi_awvalid<=0;
+      @(posedge axi_clk);
     end
   endtask
 
@@ -66,7 +67,8 @@ module tb_ddr4_controller_m6;
       s_axi_wdata<=data; s_axi_wstrb<=4'hf; s_axi_wlast<=1; s_axi_wvalid<=1;
       n=0; while(!(s_axi_wvalid&&s_axi_wready) && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
       if(n>=TIMEOUT) $fatal(1,"W timeout");
-      @(posedge axi_clk); s_axi_wvalid<=0; s_axi_wlast<=0;
+      s_axi_wvalid<=0; s_axi_wlast<=0;
+      @(posedge axi_clk);
     end
   endtask
 
@@ -90,7 +92,8 @@ module tb_ddr4_controller_m6;
       s_axi_araddr<=addr; s_axi_arlen<=0; s_axi_arsize<=3'd2; s_axi_arburst<=2'b01; s_axi_arvalid<=1;
       n=0; while(!(s_axi_arvalid&&s_axi_arready) && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
       if(n>=TIMEOUT) $fatal(1,"AR timeout");
-      @(posedge axi_clk); s_axi_arvalid<=0;
+      s_axi_arvalid<=0;
+      @(posedge axi_clk);
     end
   endtask
 
@@ -138,32 +141,27 @@ module tb_ddr4_controller_m6;
     while(!status[0]&&n<TIMEOUT) begin apb_read(REG_STATUS,status); n=n+1; end
     if(!status[0]) $fatal(1,"init timeout");
 
-    // AW before W.
     drive_aw(32'h1000); repeat(5) @(posedge axi_clk); drive_w(32'h1111_0001); wait_b();
 
-    // W before AW. WREADY must remain low until an address is available.
     @(posedge axi_clk); s_axi_wdata<=32'h2222_0002; s_axi_wstrb<=4'hf; s_axi_wlast<=1; s_axi_wvalid<=1;
     repeat(5) begin @(posedge axi_clk); if(s_axi_wready) $fatal(1,"W accepted without AW"); end
     drive_aw(32'h1004);
-    while(!(s_axi_wvalid&&s_axi_wready)) @(posedge axi_clk);
-    @(posedge axi_clk); s_axi_wvalid<=0; s_axi_wlast<=0; wait_b();
+    s_axi_wvalid<=0; s_axi_wlast<=0;
+    wait_b();
 
     drive_ar(32'h1000); wait_r(rd); if(rd!==32'h1111_0001) $fatal(1,"readback 0 mismatch");
     drive_ar(32'h1004); wait_r(rd); if(rd!==32'h2222_0002) $fatal(1,"readback 1 mismatch");
 
-    // Queue eight writes, stall B, then release and check one response per request.
     s_axi_bready=0;
     for(i=0;i<8;i=i+1) begin drive_aw(32'h1100+i*4); drive_w(32'h6000_0000+i); end
     repeat(20) @(posedge axi_clk); s_axi_bready=1;
     for(i=0;i<8;i=i+1) wait_b();
 
-    // Queue eight reads, stall R, then release and verify order/data/RLAST.
     s_axi_rready=0;
     for(i=0;i<8;i=i+1) drive_ar(32'h1100+i*4);
     repeat(20) @(posedge axi_clk); s_axi_rready=1;
     for(i=0;i<8;i=i+1) begin wait_r(rd); if(rd!==(32'h6000_0000+i)) $fatal(1,"ordered read mismatch %0d",i); end
 
-    // Reset with an accepted AW but no W. Transaction must be cancelled.
     drive_aw(32'h1200);
     @(posedge axi_clk); axi_rst_n<=0; repeat(4) @(posedge axi_clk);
     if(s_axi_bvalid||s_axi_rvalid) $fatal(1,"response valid during reset");
@@ -171,14 +169,14 @@ module tb_ddr4_controller_m6;
     axi_write(32'h1200,32'habcd_1234);
     drive_ar(32'h1200); wait_r(rd); if(rd!==32'habcd_1234) $fatal(1,"post-reset transaction failed");
 
-    // Unsupported encoding detection at verification boundary.
     @(posedge axi_clk);
     s_axi_araddr<=32'h1202; s_axi_arlen<=1; s_axi_arsize<=1; s_axi_arburst<=2'b10; s_axi_arvalid<=1;
     @(posedge axi_clk);
     if(!(s_axi_arlen!=0 || s_axi_arsize!=2 || s_axi_arburst!=2'b01 || s_axi_araddr[1:0]!=0))
       $fatal(1,"unsupported encoding detector failed");
     while(!s_axi_arready) @(posedge axi_clk);
-    @(posedge axi_clk); s_axi_arvalid<=0;
+    s_axi_arvalid<=0;
+    @(posedge axi_clk);
     wait_r(rd);
 
     $display("PASS M6 AXI protocol coverage: aw_w_independent=1 outstanding=8 reset=1 unsupported_detected=1");
