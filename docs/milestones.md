@@ -26,9 +26,15 @@ Reference CI run: `29544225711`.
 
 Status: **IN PROGRESS**
 
+Current CI validation:
+
+- Production testbench directly instantiates `ddr4_controller_top` and the behavioral DDR4 model.
+- Asynchronous AXI/APB and DDR clocks, reset, initialization timeout, APB status, MRS and ZQCL checks are enabled.
+- CI was explicitly retriggered on 2026-07-19 to validate the production functional workflow.
+
 Planned work:
 
-- Instantiate the production `ddr4_controller_top` with the behavioral DDR4 model.
 - Verify APB initialization and AXI read/write paths across asynchronous clock domains.
-- Add scoreboarding, timeout checks, and CI artifacts.
+- Add single-write, single-read and read-after-write scoreboarding.
+- Expand to AXI burst and randomized regression.
 - Replace the compatibility smoke test as the primary functional gate after equivalent production coverage is achieved.
