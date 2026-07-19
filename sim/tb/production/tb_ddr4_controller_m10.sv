@@ -92,7 +92,6 @@ module tb_ddr4_controller_m10;
     rst_n = 1;
     repeat (2) @(posedge clk);
 
-    // M7: legal ACT/RD/PRE sequence and mandatory refresh blocking.
     pulse_act(0);
     pulse_col(0, 0);
     pulse_pre(0);
@@ -100,11 +99,11 @@ module tb_ddr4_controller_m10;
     refresh_ack = 1;
     @(posedge clk);
     refresh_ack = 0;
+    #1;
     if (!refresh_block) $fatal(1, "M7 refresh did not enter tRFC block");
     while (refresh_block) @(posedge clk);
     if (violation) $fatal(1, "M7 legal sequence reported timing violation");
 
-    // M8: row hit wins over an older row miss; then age arbitration selects the survivor.
     open_valid[2] = 1;
     open_row[2] = 15'h123;
     req_valid = 4'b0011;
@@ -125,7 +124,6 @@ module tb_ddr4_controller_m10;
     req_valid = 0;
     grant_accept = 0;
 
-    // M9: PHY training completes when every phase observes a valid sample.
     train_start = 1;
     while (!write_level_en) @(posedge clk);
     phy_sample_ok = 1; @(posedge clk); phy_sample_ok = 0;
@@ -138,7 +136,6 @@ module tb_ddr4_controller_m10;
     train_start = 0;
     @(posedge clk);
 
-    // M10: closure counters must show exercised command and policy classes with no error.
     if (act_count < 1 || rd_count < 1 || pre_count < 1 || ref_count < 1)
       $fatal(1, "M10 command coverage counters incomplete");
     if (row_hit_count < 1) $fatal(1, "M10 row-hit coverage missing");
