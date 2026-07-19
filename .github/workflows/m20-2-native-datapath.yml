@@ -1,0 +1,34 @@
+name: M20.2 Native Datapath Regression
+
+on:
+  push:
+    branches: [ main, 'agent/**' ]
+  pull_request:
+
+jobs:
+  m20_2_native_datapath:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: sudo apt-get update && sudo apt-get install -y iverilog
+      - name: Compile native datapath regression
+        working-directory: sim/run
+        run: iverilog -g2012 -s tb_ddr4_controller_m20_2 -o simv_m20_2 -f ../filelist/m20_2_tb.f 2>&1 | tee compile_m20_2.log
+      - name: Run native datapath regression
+        working-directory: sim/run
+        run: vvp simv_m20_2 2>&1 | tee sim_m20_2.log
+      - name: Check closure signatures
+        working-directory: sim/run
+        run: |
+          grep -q 'PASS M20.2 native FIFO-to-scheduler datapath' sim_m20_2.log
+          grep -q 'PASS M20.2 FR-FCFS request selection' sim_m20_2.log
+          grep -q 'PASS M20.2 extended timing admission guard' sim_m20_2.log
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m20-2-native-datapath-${{ github.run_id }}
+          path: |
+            sim/run/compile_m20_2.log
+            sim/run/sim_m20_2.log
