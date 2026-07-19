@@ -66,7 +66,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Publish CI report issue
+      - name: Maintain Icarus CI failure issue
         if: always() && github.event_name != 'pull_request'
         uses: actions/github-script@v7
         env:
@@ -76,31 +76,52 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const tail = (path) => {
-              if (!fs.existsSync(path)) return '(log file not generated)';
-              const text = fs.readFileSync(path, 'utf8');
-              return text.slice(-12000);
-            };
-            const compileLog = tail('sim/build_iverilog/compile.log');
-            const simLog = tail('sim/build_iverilog/sim.log');
-            const title = `[Icarus CI] ${process.env.CI_STATUS}: ${process.env.COMMIT_SHA.substring(0, 8)}`;
-            const body = [
-              `Status: **${process.env.CI_STATUS}**`,
-              `Commit: \`${process.env.COMMIT_SHA}\``,
-              `Run: ${process.env.RUN_URL}`,
-              '',
-              '## Compile log',
-              '```text', compileLog, '```',
-              '',
-              '## Simulation log',
-              '```text', simLog, '```'
-            ].join('\n');
-            await github.rest.issues.create({
+            const issueTitle = '[Icarus CI] active failure';
+            const {data: issues} = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title,
-              body
+              state: 'open',
+              per_page: 100
             });
+            const existing = issues.find(issue => !issue.pull_request && issue.title === issueTitle);
+
+            if (process.env.CI_STATUS === 'success') {
+              if (existing) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  state: 'closed',
+                  state_reason: 'completed'
+                });
+              }
+              return;
+            }
+
+            const tail = path => fs.existsSync(path) ? fs.readFileSync(path, 'utf8').slice(-12000) : '(log file not generated)';
+            const body = [
+              'Status: **failure**',
+              `Commit: ${process.env.COMMIT_SHA}`,
+              `Run: ${process.env.RUN_URL}`,
+              '', '## Compile log', '```text', tail('sim/build_iverilog/compile.log'), '```',
+              '', '## Simulation log', '```text', tail('sim/build_iverilog/sim.log'), '```'
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body
+              });
+            }
 
   production_rtl_compile:
     name: Production RTL compile gate
