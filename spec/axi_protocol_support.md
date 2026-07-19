@@ -42,3 +42,5 @@ M6 CI verifies:
 - Response ordering and `RLAST` behavior.
 - Reset while AW, W, B, AR, or R activity is pending.
 - Detection of unsupported request encodings.
+
+The `agent/m6-ci-validation` branch is used only to force a complete pull-request workflow validation of the M6 implementation before fast-forwarding the validated revision to `main`.
