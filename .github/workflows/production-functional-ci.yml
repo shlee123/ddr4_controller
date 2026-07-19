@@ -1,0 +1,58 @@
+name: Production Functional Regression
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  production_functional_regression:
+    name: Production DDR4 initialization regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+
+      - name: Compile production testbench
+        working-directory: sim
+        run: |
+          rm -rf build_production_tb
+          mkdir -p build_production_tb
+          cd build_production_tb
+          set -o pipefail
+          iverilog -g2012 -Wall -Wimplicit \
+            -s tb_ddr4_controller_production \
+            -o production_tb \
+            -f ../filelist/production_tb.f \
+            2>&1 | tee compile.log
+
+      - name: Run production initialization regression
+        working-directory: sim/build_production_tb
+        run: |
+          set -o pipefail
+          vvp production_tb 2>&1 | tee sim.log
+          grep -q "PASS production initialization" sim.log
+
+      - name: Print logs
+        if: always()
+        run: |
+          test ! -f sim/build_production_tb/compile.log || cat sim/build_production_tb/compile.log
+          test ! -f sim/build_production_tb/sim.log || cat sim/build_production_tb/sim.log
+
+      - name: Upload production functional logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-functional-${{ github.run_id }}
+          path: |
+            sim/build_production_tb/compile.log
+            sim/build_production_tb/sim.log
+          if-no-files-found: warn
+          retention-days: 14
