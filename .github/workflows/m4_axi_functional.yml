@@ -84,7 +84,7 @@ jobs:
             const tail = p => fs.existsSync(p) ? fs.readFileSync(p, 'utf8').slice(-12000) : '(not generated)';
             const body = [
               'Status: **failure**',
-              `Commit: \`${process.env.COMMIT_SHA}\``,
+              `Commit: ${process.env.COMMIT_SHA}`,
               `Run: ${process.env.RUN_URL}`,
               '', '## Compile log', '```text', tail('sim/build_m4/compile.log'), '```',
               '', '## Simulation log', '```text', tail('sim/build_m4/sim.log'), '```'
