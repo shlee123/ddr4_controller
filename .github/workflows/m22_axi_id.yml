@@ -21,7 +21,7 @@ jobs:
           sudo apt-get install -y iverilog
       - name: Verify ID interface
         run: |
-          grep -q "parameter int AXI_ID_W=6" rtl/ddr4_controller_top.sv
+          grep -Eq "AXI_ID_W[[:space:]]*=[[:space:]]*6" rtl/ddr4_controller_top.sv
           grep -q "s_axi_awid" rtl/ddr4_controller_top.sv
           grep -q "s_axi_arid" rtl/ddr4_controller_top.sv
           grep -q "s_axi_bid" rtl/ddr4_controller_top.sv
