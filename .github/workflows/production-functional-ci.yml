@@ -61,7 +61,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Publish production functional report
+      - name: Maintain production CI failure issue
         if: always() && github.event_name != 'pull_request'
         uses: actions/github-script@v7
         env:
@@ -71,22 +71,49 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const read = (path) => fs.existsSync(path) ? fs.readFileSync(path, 'utf8').slice(-12000) : '(not generated)';
-            const compileLog = read('sim/build_production_tb/compile.log');
-            const simLog = read('sim/build_production_tb/sim.log');
-            await github.rest.issues.create({
+            const issueTitle = '[Production Functional CI] active failure';
+            const {data: issues} = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[Production Functional CI] ${process.env.CI_STATUS}: ${process.env.COMMIT_SHA.substring(0, 8)}`,
-              body: [
-                `Status: **${process.env.CI_STATUS}**`,
-                `Commit: \`${process.env.COMMIT_SHA}\``,
-                `Run: ${process.env.RUN_URL}`,
-                '',
-                '## Compile log',
-                '```text', compileLog, '```',
-                '',
-                '## Simulation log',
-                '```text', simLog, '```'
-              ].join('\n')
+              state: 'open',
+              per_page: 100
             });
+            const existing = issues.find(issue => !issue.pull_request && issue.title === issueTitle);
+
+            if (process.env.CI_STATUS === 'success') {
+              if (existing) {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  state: 'closed',
+                  state_reason: 'completed'
+                });
+              }
+              return;
+            }
+
+            const read = path => fs.existsSync(path) ? fs.readFileSync(path, 'utf8').slice(-12000) : '(not generated)';
+            const body = [
+              'Status: **failure**',
+              `Commit: ${process.env.COMMIT_SHA}`,
+              `Run: ${process.env.RUN_URL}`,
+              '', '## Compile log', '```text', read('sim/build_production_tb/compile.log'), '```',
+              '', '## Simulation log', '```text', read('sim/build_production_tb/sim.log'), '```'
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body
+              });
+            }
