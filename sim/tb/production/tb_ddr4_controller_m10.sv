@@ -54,7 +54,7 @@ module tb_ddr4_controller_m10;
       while (!allow_act) @(posedge clk);
       issue_act = 1;
       @(posedge clk);
-      issue_act = 0;
+      #1 issue_act = 0;
     end
   endtask
 
@@ -65,7 +65,7 @@ module tb_ddr4_controller_m10;
       issue_rd = !wr;
       issue_wr = wr;
       @(posedge clk);
-      issue_rd = 0;
+      #1 issue_rd = 0;
       issue_wr = 0;
     end
   endtask
@@ -76,7 +76,7 @@ module tb_ddr4_controller_m10;
       while (!allow_pre) @(posedge clk);
       issue_pre = 1;
       @(posedge clk);
-      issue_pre = 0;
+      #1 issue_pre = 0;
     end
   endtask
 
@@ -98,8 +98,7 @@ module tb_ddr4_controller_m10;
     wait (refresh_pending);
     refresh_ack = 1;
     @(posedge clk);
-    refresh_ack = 0;
-    #1;
+    #1 refresh_ack = 0;
     if (!refresh_block) $fatal(1, "M7 refresh did not enter tRFC block");
     while (refresh_block) @(posedge clk);
     if (violation) $fatal(1, "M7 legal sequence reported timing violation");
@@ -114,23 +113,23 @@ module tb_ddr4_controller_m10;
       $fatal(1, "M8 row-hit priority failed: grant=%0d hit=%0b", grant_index, grant_row_hit);
     grant_accept = 1;
     @(posedge clk);
-    req_valid[1] = 0;
+    #1 req_valid[1] = 0;
     grant_accept = 0;
     repeat (3) @(posedge clk);
     if (!grant_valid || grant_index != 0)
       $fatal(1, "M8 fairness/age selection failed: grant=%0d", grant_index);
     grant_accept = 1;
     @(posedge clk);
-    req_valid = 0;
+    #1 req_valid = 0;
     grant_accept = 0;
 
     train_start = 1;
     while (!write_level_en) @(posedge clk);
-    phy_sample_ok = 1; @(posedge clk); phy_sample_ok = 0;
+    phy_sample_ok = 1; @(posedge clk); #1 phy_sample_ok = 0;
     while (!read_gate_en) @(posedge clk);
-    phy_sample_ok = 1; @(posedge clk); phy_sample_ok = 0;
+    phy_sample_ok = 1; @(posedge clk); #1 phy_sample_ok = 0;
     while (!read_eye_en) @(posedge clk);
-    phy_sample_ok = 1; @(posedge clk); phy_sample_ok = 0;
+    phy_sample_ok = 1; @(posedge clk); #1 phy_sample_ok = 0;
     wait (train_done || train_fail);
     if (!train_done || train_fail) $fatal(1, "M9 PHY training did not complete");
     train_start = 0;
