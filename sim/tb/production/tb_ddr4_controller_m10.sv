@@ -11,7 +11,7 @@ module tb_ddr4_controller_m10;
   logic refresh_pending, refresh_block, allow_act, allow_pre, allow_col, violation;
 
   ddr4_timing_refresh_guard #(
-    .T_REFI_CK(32), .T_RFC_CK(6), .T_RCD_CK(3), .T_RP_CK(3),
+    .T_REFI_CK(128), .T_RFC_CK(6), .T_RCD_CK(3), .T_RP_CK(3),
     .T_RAS_CK(5), .T_RC_CK(8), .T_CCD_CK(2), .T_RRD_CK(2), .T_FAW_CK(8), .BANKS(16)
   ) u_guard (
     .clk, .rst_n, .refresh_ack, .issue_act, .issue_pre, .issue_rd, .issue_wr,
