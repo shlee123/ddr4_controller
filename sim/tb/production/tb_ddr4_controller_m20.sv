@@ -40,7 +40,7 @@ module tb_ddr4_controller_m20;
   logic [31:0] cycles,busy_cycles,read_count,write_count,refresh_count,row_hit_count,latency_sum,max_queue_level;
   ddr4_perf_monitor #(.QUEUE_W(4)) u_perf(.clk,.rst_n,.req_accept(p_req),.rsp_complete(p_rsp),.cmd_rd(p_rd),.cmd_wr(p_wr),.cmd_ref(p_ref),.row_hit(p_hit),.queue_level(q_level),.cycles,.busy_cycles,.read_count,.write_count,.refresh_count,.row_hit_count,.latency_sum,.max_queue_level);
 
-  task automatic negedge_pulse(output logic sig);
+  task automatic negedge_pulse(inout logic sig);
     begin @(negedge clk); sig=1; @(negedge clk); sig=0; end
   endtask
 
@@ -55,7 +55,6 @@ module tb_ddr4_controller_m20;
     for(i=0;i<16;i=i+1) open_row[i]=0;
     repeat(4) @(posedge clk); rst_n=1; repeat(2) @(posedge clk);
 
-    // M11 INCR burst: four 32-bit beats.
     @(negedge clk); b_start=1; @(negedge clk); b_start=0;
     for(i=0;i<4;i=i+1) begin
       if(!b_active || b_addr != 32'h1000+i*4 || b_idx != i) $fatal(1,"M11 burst mismatch beat=%0d addr=%h idx=%0d",i,b_addr,b_idx);
@@ -63,7 +62,6 @@ module tb_ddr4_controller_m20;
     end
     if(b_active || b_unsup) $fatal(1,"M11 burst completion failed");
 
-    // M12/M13 FIFO preserves order and reports occupancy.
     for(i=0;i<3;i=i+1) begin q_in=64'h100+i; negedge_pulse(q_push); end
     if(q_level!=3) $fatal(1,"M12 write buffer level=%0d",q_level);
     for(i=0;i<3;i=i+1) begin
@@ -72,7 +70,6 @@ module tb_ddr4_controller_m20;
     end
     if(!q_empty || q_ov || q_un) $fatal(1,"M12/M13 buffer flags invalid");
 
-    // M14/M15 FR-FCFS row hit and bank selection.
     open_valid[2]=1; open_row[2]=15'h123;
     req_valid=4'b0011; req_bank[0]=1;req_row[0]=15'h001;req_write[0]=0;
     req_bank[1]=2;req_row[1]=15'h123;req_write[1]=1;prefer_writes=1;
@@ -80,29 +77,24 @@ module tb_ddr4_controller_m20;
     if(!g_valid || g_index!=1 || !g_hit || !g_write || g_bank!=2) $fatal(1,"M14/M15 scheduler priority failed");
     @(negedge clk);g_accept=1;@(negedge clk);g_accept=0;req_valid=0;
 
-    // M16 legal extended timing sequence.
     same_bg=0; negedge_pulse(t_wr); while(!t_allow_rd) @(posedge clk); negedge_pulse(t_rd);
     while(!t_allow_pre) @(posedge clk); negedge_pulse(t_pre);
     while(!t_allow_mrs) @(posedge clk); negedge_pulse(t_mrs);
     while(!t_allow_zq) @(posedge clk); negedge_pulse(t_zq);
     if(t_violation) $fatal(1,"M16 legal timing sequence violated");
 
-    // M17 mode register programming.
     cfg_idx=3;cfg_data=17'h15555;negedge_pulse(cfg_we);#1;
     if(mr[3]!=17'h15555) $fatal(1,"M17 MR programming failed");
 
-    // M18 power states and wake.
     negedge_pulse(pd_enter);if(!power_down)$fatal(1,"M18 power-down failed");
     negedge_pulse(wake);if(power_down)$fatal(1,"M18 wake failed");
     negedge_pulse(sr_enter);if(!self_refresh)$fatal(1,"M18 self-refresh failed");
     negedge_pulse(wake);if(self_refresh)$fatal(1,"M18 self-refresh exit failed");
 
-    // M19 deterministic error injection, poison and retry.
     data_in=32'hdeadbeef;crc_in=0;inject_error=1;negedge_pulse(data_valid);#1;
     if(!poison) $fatal(1,"M19 poison missing");
     inject_error=0;
 
-    // M20 counters and latency accumulation.
     @(negedge clk);p_req=1;p_rd=1;p_hit=1;@(negedge clk);p_req=0;p_rd=0;p_hit=0;
     repeat(3) @(posedge clk);
     @(negedge clk);p_rsp=1;p_wr=1;p_ref=1;@(negedge clk);p_rsp=0;p_wr=0;p_ref=0;
