@@ -3,10 +3,10 @@
 
 import ddr4_ctrl_pkg::*;
 
-// Native DDR-clock-domain arbitration layer placed between the AXI CDC
-// request FIFOs and the command scheduler. Packed-vector ports keep the
-// boundary compatible with Icarus, VCS and synthesis tools; internally the
-// vectors map bit-for-bit to ddr_req_t.
+// Native DDR-clock-domain arbitration layer between the AXI CDC request
+// FIFOs and the command scheduler. A one-cycle re-arm bubble after each
+// source pop allows asynchronous FIFO output/empty state to settle before
+// the next grant and prevents a consumed entry from being presented twice.
 module ddr4_native_request_mux #(
   parameter int AXI_ADDR_W = 32,
   parameter int BANK_W = 4,
@@ -43,13 +43,14 @@ module ddr4_native_request_mux #(
   logic [BANK_W-1:0] grant_bank;
   logic prefer_writes;
   logic allow_rd, allow_wr, allow_pre, allow_mrs, allow_zq;
+  logic rearm;
   integer i;
 
   always_comb begin
     wr_req_s = wr_req_in;
     rd_req_s = rd_req_in;
-    req_valid[0] = !wr_empty_in;
-    req_valid[1] = !rd_empty_in;
+    req_valid[0] = !wr_empty_in && !rearm;
+    req_valid[1] = !rd_empty_in && !rearm;
     req_write = 2'b01;
     req_bank[0] = wr_req_s.addr[5 +: BANK_W];
     req_bank[1] = rd_req_s.addr[5 +: BANK_W];
@@ -61,9 +62,9 @@ module ddr4_native_request_mux #(
     rd_req_out = rd_req_in;
     wr_empty_out = 1'b1;
     rd_empty_out = 1'b1;
-    if (grant_valid && grant_write && allow_wr)
+    if (grant_valid && grant_write && allow_wr && !rearm)
       wr_empty_out = 1'b0;
-    if (grant_valid && !grant_write && allow_rd)
+    if (grant_valid && !grant_write && allow_rd && !rearm)
       rd_empty_out = 1'b0;
   end
 
@@ -94,10 +95,14 @@ module ddr4_native_request_mux #(
   always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       open_valid <= '0;
+      rearm <= 1'b0;
       for (i=0; i<(1<<BANK_W); i=i+1) open_row[i] <= '0;
-    end else if (grant_accept) begin
-      open_valid[grant_bank] <= 1'b1;
-      open_row[grant_bank] <= grant_write ? req_row[0] : req_row[1];
+    end else begin
+      rearm <= grant_accept;
+      if (grant_accept) begin
+        open_valid[grant_bank] <= 1'b1;
+        open_row[grant_bank] <= grant_write ? req_row[0] : req_row[1];
+      end
     end
   end
 endmodule
