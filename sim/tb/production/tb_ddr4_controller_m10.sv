@@ -50,33 +50,45 @@ module tb_ddr4_controller_m10;
 
   task automatic pulse_act(input logic [3:0] bank);
     begin
+      @(negedge clk);
       issue_bank = bank;
-      while (!allow_act) @(posedge clk);
+      while (!allow_act) @(negedge clk);
       issue_act = 1;
-      @(posedge clk);
-      #1 issue_act = 0;
+      @(negedge clk);
+      issue_act = 0;
     end
   endtask
 
   task automatic pulse_col(input logic wr, input logic [3:0] bank);
     begin
+      @(negedge clk);
       issue_bank = bank;
-      while (!allow_col) @(posedge clk);
+      while (!allow_col) @(negedge clk);
       issue_rd = !wr;
       issue_wr = wr;
-      @(posedge clk);
-      #1 issue_rd = 0;
+      @(negedge clk);
+      issue_rd = 0;
       issue_wr = 0;
     end
   endtask
 
   task automatic pulse_pre(input logic [3:0] bank);
     begin
+      @(negedge clk);
       issue_bank = bank;
-      while (!allow_pre) @(posedge clk);
+      while (!allow_pre) @(negedge clk);
       issue_pre = 1;
-      @(posedge clk);
-      #1 issue_pre = 0;
+      @(negedge clk);
+      issue_pre = 0;
+    end
+  endtask
+
+  task automatic pulse_sample;
+    begin
+      @(negedge clk);
+      phy_sample_ok = 1;
+      @(negedge clk);
+      phy_sample_ok = 0;
     end
   endtask
 
@@ -89,20 +101,20 @@ module tb_ddr4_controller_m10;
     for (i = 0; i < 16; i = i + 1) open_row[i] = 0;
 
     repeat (4) @(posedge clk);
-    rst_n = 1;
+    @(negedge clk); rst_n = 1;
     repeat (2) @(posedge clk);
 
     pulse_act(0);
     pulse_col(0, 0);
     pulse_pre(0);
     wait (refresh_pending);
-    refresh_ack = 1;
-    @(posedge clk);
-    #1 refresh_ack = 0;
+    @(negedge clk); refresh_ack = 1;
+    @(negedge clk); refresh_ack = 0;
     if (!refresh_block) $fatal(1, "M7 refresh did not enter tRFC block");
     while (refresh_block) @(posedge clk);
     if (violation) $fatal(1, "M7 legal sequence reported timing violation");
 
+    @(negedge clk);
     open_valid[2] = 1;
     open_row[2] = 15'h123;
     req_valid = 4'b0011;
@@ -111,28 +123,24 @@ module tb_ddr4_controller_m10;
     repeat (2) @(posedge clk);
     if (!grant_valid || grant_index != 1 || !grant_row_hit)
       $fatal(1, "M8 row-hit priority failed: grant=%0d hit=%0b", grant_index, grant_row_hit);
-    grant_accept = 1;
-    @(posedge clk);
-    #1 req_valid[1] = 0;
-    grant_accept = 0;
+    @(negedge clk); grant_accept = 1;
+    @(negedge clk); grant_accept = 0; req_valid[1] = 0;
     repeat (3) @(posedge clk);
     if (!grant_valid || grant_index != 0)
       $fatal(1, "M8 fairness/age selection failed: grant=%0d", grant_index);
-    grant_accept = 1;
-    @(posedge clk);
-    #1 req_valid = 0;
-    grant_accept = 0;
+    @(negedge clk); grant_accept = 1;
+    @(negedge clk); grant_accept = 0; req_valid = 0;
 
-    train_start = 1;
+    @(negedge clk); train_start = 1;
     while (!write_level_en) @(posedge clk);
-    phy_sample_ok = 1; @(posedge clk); #1 phy_sample_ok = 0;
+    pulse_sample();
     while (!read_gate_en) @(posedge clk);
-    phy_sample_ok = 1; @(posedge clk); #1 phy_sample_ok = 0;
+    pulse_sample();
     while (!read_eye_en) @(posedge clk);
-    phy_sample_ok = 1; @(posedge clk); #1 phy_sample_ok = 0;
+    pulse_sample();
     wait (train_done || train_fail);
     if (!train_done || train_fail) $fatal(1, "M9 PHY training did not complete");
-    train_start = 0;
+    @(negedge clk); train_start = 0;
     @(posedge clk);
 
     if (act_count < 1 || rd_count < 1 || pre_count < 1 || ref_count < 1)
