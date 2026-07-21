@@ -29,11 +29,11 @@ module tb_ddr4_controller_m23_m28;
     if(!lasts[6])$fatal(1,"M26 last beat missing");$display("PASS M26 complete burst beat expansion");
     if(command_count!=0)$fatal(1,"M27 command queue did not drain %0d",command_count);$display("PASS M27 multi-entry bank command scheduler");
     complete(tags[1],32'haaaa_002a);complete(tags[0],32'h1111_0003);complete(tags[2],32'h2222_0003);complete(tags[3],0);complete(tags[4],0);complete(tags[5],0);complete(tags[6],0);
-    r_ready=1;b_ready=1;
+    r_ready=1;b_ready=0;
     n=0;while(!(r_valid&&r_id==6'h2a)&&n<100)begin @(posedge clk);n=n+1;end if(n>=100||r_data!==32'haaaa_002a)$fatal(1,"M24 cross-ID completion failed");@(posedge clk);
     n=0;while(!(r_valid&&r_id==6'h03&&r_data==32'h1111_0003)&&n<100)begin @(posedge clk);n=n+1;end if(n>=100)$fatal(1,"M24 first same-ID response missing");@(posedge clk);
     n=0;while(!(r_valid&&r_id==6'h03&&r_data==32'h2222_0003)&&n<100)begin @(posedge clk);n=n+1;end if(n>=100)$fatal(1,"M24 per-ID ordering failed");$display("PASS M24 read reorder buffer");
-    n=0;while(!(b_valid&&b_id==6'h11)&&n<100)begin @(posedge clk);n=n+1;end if(n>=100)$fatal(1,"M25 independent B queue failed");$display("PASS M25 independent B and R response queues");
+    b_ready=1;n=0;while(!(b_valid&&b_id==6'h11)&&n<100)begin @(posedge clk);n=n+1;end if(n>=100)$fatal(1,"M25 independent B queue failed");$display("PASS M25 independent B and R response queues");
     n=0;while(!refresh_req&&n<300)begin @(posedge clk);n=n+1;end if(n>=300||!refresh_block)$fatal(1,"M28 refresh request/block missing");
     saw_refresh=1;@(posedge clk);refresh_ack<=1;@(posedge clk);refresh_ack<=0;repeat(3)begin @(posedge clk);if(!refresh_block)$fatal(1,"M28 tRFC block released early");end
     n=0;while(refresh_block&&n<20)begin @(posedge clk);n=n+1;end if(n>=20)$fatal(1,"M28 tRFC block stuck");if(refresh_deadline_error)$fatal(1,"M28 unexpected refresh deadline error");
