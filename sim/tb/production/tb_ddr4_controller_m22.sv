@@ -12,5 +12,11 @@ module tb_ddr4_controller_m22;
   task automatic write_id(input [5:0] id,input [31:0] a,input [31:0] d);integer n;begin @(posedge axi_clk);awid<=id;awaddr<=a;awvalid<=1;while(!awready)@(posedge axi_clk);@(posedge axi_clk);awvalid<=0;wdata<=d;wstrb<=4'hf;wlast<=1;wvalid<=1;while(!wready)@(posedge axi_clk);@(posedge axi_clk);wvalid<=0;wlast<=0;n=0;while(!bvalid&&n<TIMEOUT)begin @(posedge axi_clk);n++;end if(!bvalid||bid!==id)$fatal(1,"BID mismatch exp=%0d got=%0d",id,bid);@(posedge axi_clk);end endtask
   task automatic read_id(input [5:0] id,input [31:0] a,input [31:0] exp);integer n;begin @(posedge axi_clk);arid<=id;araddr<=a;arvalid<=1;while(!arready)@(posedge axi_clk);@(posedge axi_clk);arvalid<=0;n=0;while(!rvalid&&n<TIMEOUT)begin @(posedge axi_clk);n++;end if(!rvalid||rid!==id)$fatal(1,"RID mismatch exp=%0d got=%0d",id,rid);if(rdata!==exp)$fatal(1,"data mismatch");@(posedge axi_clk);end endtask
   initial begin awid=0;awaddr=0;awlen=0;awsize=2;awburst=1;awvalid=0;wdata=0;wstrb=0;wlast=0;wvalid=0;bready=1;arid=0;araddr=0;arlen=0;arsize=2;arburst=1;arvalid=0;rready=1;paddr=0;psel=0;penable=0;pwrite=0;pwdata=0;repeat(8)@(posedge axi_clk);axi_rst_n=1;repeat(8)@(posedge ddr_clk);ddr_rst_n=1;wait_init();write_id(6'h03,32'h2000,32'h11112222);write_id(6'h2a,32'h2004,32'h33334444);write_id(6'h03,32'h2008,32'h55556666);read_id(6'h2a,32'h2004,32'h33334444);read_id(6'h03,32'h2000,32'h11112222);read_id(6'h03,32'h2008,32'h55556666);$display("PASS M22 AXI 6-bit ID echo and per-ID ordering");$finish;end
+  always @(posedge ddr_clk) begin
+    if(dut.u_m29_bridge.wr_pop)$display("TRACE wr_pop req_id=%0d",dut.u_m29_bridge.req_id);
+    if(dut.u_m29_bridge.meta_push)$display("TRACE cmd issue id=%0d tag=%0d wr=%0d",dut.u_m29_bridge.cmd_id,dut.u_m29_bridge.cmd_tag,dut.u_m29_bridge.cmd_write);
+    if(dut.u_m29_bridge.sched_rsp_wr)$display("TRACE completion id=%0d tag=%0d wr=%0d",dut.u_m29_bridge.cpl_id,dut.u_m29_bridge.cpl_tag,dut.u_m29_bridge.cpl_write);
+    if(dut.u_m29_bridge.bridge_rsp_wr)$display("TRACE bridge rsp id=%0d wr=%0d",dut.u_m29_bridge.bridge_rsp.id,dut.u_m29_bridge.bridge_rsp.wr);
+  end
   initial begin #300000;$fatal(1,"M22 timeout");end
 endmodule
