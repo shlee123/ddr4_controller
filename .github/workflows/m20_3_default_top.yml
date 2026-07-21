@@ -21,9 +21,11 @@ jobs:
           sudo apt-get install -y iverilog
       - name: Verify native cutover source
         run: |
-          grep -q "u_native_request_mux" rtl/ddr4_controller_top.sv
-          grep -q "wr_req_data(wr_req_native)" rtl/ddr4_controller_top.sv
-          grep -q "rd_req_data(rd_req_native)" rtl/ddr4_controller_top.sv
+          grep -q "u_m29_bridge" rtl/ddr4_controller_top.sv
+          grep -q "wr_req_data(sched_wr_req)" rtl/ddr4_controller_top.sv
+          grep -q "rd_req_data(sched_rd_req)" rtl/ddr4_controller_top.sv
+          ! grep -q "u_native_request_mux" rtl/ddr4_controller_top.sv
+          ! grep -q "u_rsp_id_fifo" rtl/ddr4_controller_top.sv
       - name: Compile full AXI to DDR regression
         working-directory: sim
         run: |
