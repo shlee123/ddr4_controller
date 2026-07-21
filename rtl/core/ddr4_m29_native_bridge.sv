@@ -54,12 +54,13 @@ module ddr4_m29_native_bridge #(
     end
   end
 
-  wire [TAG_W+ID_W:0]meta_out;
-  wire [TAG_W-1:0]cpl_tag=meta_out[TAG_W+ID_W:ID_W+1];
-  wire cpl_write=meta_out[ID_W];
-  wire [ID_W-1:0]cpl_id=meta_out[ID_W-1:0];
-  wire meta_full,meta_empty;
+  wire tag_full,tag_empty,id_full,id_empty,kind_full,kind_empty;
+  wire [TAG_W-1:0]cpl_tag;
+  wire [ID_W-1:0]cpl_id;
+  wire cpl_write;
   wire meta_push=cmd_valid&&cmd_ready;
+  wire meta_empty=tag_empty||id_empty||kind_empty;
+  wire meta_full=tag_full||id_full||kind_full;
   wire meta_pop=sched_rsp_wr&&!meta_empty;
 
   wire engine_req_valid=req_valid&&(!req_sel_wr||((wr_req.len==0)&&p_free_found));
@@ -88,16 +89,14 @@ module ddr4_m29_native_bridge #(
   assign sched_rd_empty=!(cmd_valid&&!cmd_write&&!meta_full);
   assign cmd_ready=cmd_valid&&!meta_full?(cmd_write?(p_match_found&&sched_wr_pop):sched_rd_pop):1'b0;
 
-  sync_fifo #(.WIDTH(TAG_W+ID_W+1),.DEPTH(16))u_meta_fifo(
-    .clk,.rst_n,.wr_en(meta_push),.wr_data({cmd_tag,cmd_write,cmd_id}),.full(meta_full),
-    .rd_en(meta_pop),.rd_data(meta_out),.empty(meta_empty));
+  sync_fifo #(.WIDTH(TAG_W),.DEPTH(16))u_tag_fifo(.clk,.rst_n,.wr_en(meta_push),.wr_data(cmd_tag),.full(tag_full),.rd_en(meta_pop),.rd_data(cpl_tag),.empty(tag_empty));
+  sync_fifo #(.WIDTH(ID_W),.DEPTH(16))u_id_fifo(.clk,.rst_n,.wr_en(meta_push),.wr_data(cmd_id),.full(id_full),.rd_en(meta_pop),.rd_data(cpl_id),.empty(id_empty));
+  sync_fifo #(.WIDTH(1),.DEPTH(16))u_kind_fifo(.clk,.rst_n,.wr_en(meta_push),.wr_data(cmd_write),.full(kind_full),.rd_en(meta_pop),.rd_data(cpl_write),.empty(kind_empty));
 
   wire wb_full,wb_empty;wire [ID_W-1:0]wb_id;
   wire wb_push=sched_rsp_wr&&!meta_empty&&cpl_write;
   wire wb_pop=b_ready&&!wb_empty;
-  sync_fifo #(.WIDTH(ID_W),.DEPTH(16))u_write_id_fifo(
-    .clk,.rst_n,.wr_en(wb_push),.wr_data(cpl_id),.full(wb_full),
-    .rd_en(wb_pop),.rd_data(wb_id),.empty(wb_empty));
+  sync_fifo #(.WIDTH(ID_W),.DEPTH(16))u_write_id_fifo(.clk,.rst_n,.wr_en(wb_push),.wr_data(cpl_id),.full(wb_full),.rd_en(wb_pop),.rd_data(wb_id),.empty(wb_empty));
   assign sched_rsp_full=meta_empty||bridge_rsp_full||(cpl_write&&wb_full);
 
   wire select_b=b_valid&&!wb_empty;
