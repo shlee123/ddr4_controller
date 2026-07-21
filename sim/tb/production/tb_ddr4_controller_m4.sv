@@ -12,6 +12,7 @@ module tb_ddr4_controller_m4;
   always #2.5 axi_clk=~axi_clk;
   always #1.0 ddr_clk=~ddr_clk;
 
+  logic [5:0] s_axi_bid,s_axi_rid;
   logic [31:0] s_axi_awaddr; logic [7:0] s_axi_awlen; logic [2:0] s_axi_awsize;
   logic [1:0] s_axi_awburst; logic s_axi_awvalid,s_axi_awready;
   logic [31:0] s_axi_wdata; logic [3:0] s_axi_wstrb; logic s_axi_wlast,s_axi_wvalid,s_axi_wready;
@@ -27,11 +28,11 @@ module tb_ddr4_controller_m4;
   ddr4_controller_top #(.AXI_ADDR_W(32),.AXI_DATA_W(32),.APB_ADDR_W(32),.APB_DATA_W(32),
     .DDR_ADDR_W(17),.DDR_BG_W(2),.DDR_BA_W(2),.DDR_DQ_W(16),.DDR_DM_W(2)) dut (
     .axi_clk,.axi_rst_n,.clk(ddr_clk),.rst_n(ddr_rst_n),
-    .s_axi_awaddr,.s_axi_awlen,.s_axi_awsize,.s_axi_awburst,.s_axi_awvalid,.s_axi_awready,
+    .s_axi_awid(6'd0),.s_axi_awaddr,.s_axi_awlen,.s_axi_awsize,.s_axi_awburst,.s_axi_awvalid,.s_axi_awready,
     .s_axi_wdata,.s_axi_wstrb,.s_axi_wlast,.s_axi_wvalid,.s_axi_wready,
-    .s_axi_bresp,.s_axi_bvalid,.s_axi_bready,
-    .s_axi_araddr,.s_axi_arlen,.s_axi_arsize,.s_axi_arburst,.s_axi_arvalid,.s_axi_arready,
-    .s_axi_rdata,.s_axi_rresp,.s_axi_rlast,.s_axi_rvalid,.s_axi_rready,
+    .s_axi_bid,.s_axi_bresp,.s_axi_bvalid,.s_axi_bready,
+    .s_axi_arid(6'd0),.s_axi_araddr,.s_axi_arlen,.s_axi_arsize,.s_axi_arburst,.s_axi_arvalid,.s_axi_arready,
+    .s_axi_rid,.s_axi_rdata,.s_axi_rresp,.s_axi_rlast,.s_axi_rvalid,.s_axi_rready,
     .paddr,.psel,.penable,.pwrite,.pwdata,.prdata,.pready,.pslverr,
     .ddr_ck_t,.ddr_ck_c,.ddr_reset_n,.ddr_cke,.ddr_cs_n,.ddr_act_n,.ddr_ras_n,.ddr_cas_n,.ddr_we_n,
     .ddr_bg,.ddr_ba,.ddr_a,.ddr_odt,.ddr_par,.ddr_alert_n,.ddr_dq,.ddr_dqs_t,.ddr_dqs_c,.ddr_dm_n);
@@ -58,6 +59,7 @@ module tb_ddr4_controller_m4;
     begin
       n=0; while (!s_axi_bvalid && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
       if (!s_axi_bvalid) $fatal(1,"B timeout addr=%h",addr);
+      if (s_axi_bid!==6'd0) $fatal(1,"BID error addr=%h id=%0d",addr,s_axi_bid);
       if (s_axi_bresp!==2'b00) $fatal(1,"BRESP error addr=%h resp=%b",addr,s_axi_bresp);
       @(posedge axi_clk);
     end
@@ -106,6 +108,7 @@ module tb_ddr4_controller_m4;
       @(posedge axi_clk); s_axi_arvalid<=0;
       n=0; while (!s_axi_rvalid && n<TIMEOUT) begin @(posedge axi_clk); n=n+1; end
       if (!s_axi_rvalid) $fatal(1,"R timeout addr=%h",addr);
+      if (s_axi_rid!==6'd0) $fatal(1,"RID error addr=%h id=%0d",addr,s_axi_rid);
       if (s_axi_rresp!==2'b00) $fatal(1,"RRESP error addr=%h resp=%b",addr,s_axi_rresp);
       if (!s_axi_rlast) $fatal(1,"Missing RLAST addr=%h",addr);
       data=s_axi_rdata;
