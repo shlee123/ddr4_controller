@@ -97,7 +97,7 @@ module ddr4_m29_native_bridge #(
   wire wb_push=sched_rsp_wr&&!meta_empty&&cpl_write;
   wire wb_pop=b_ready&&!wb_empty;
   sync_fifo #(.WIDTH(ID_W),.DEPTH(16))u_write_id_fifo(.clk,.rst_n,.wr_en(wb_push),.wr_data(cpl_id),.full(wb_full),.rd_en(wb_pop),.rd_data(wb_id),.empty(wb_empty));
-  assign sched_rsp_full=meta_empty||bridge_rsp_full||(cpl_write&&wb_full);
+  assign sched_rsp_full=bridge_rsp_full||(cpl_write&&wb_full);
 
   wire select_b=b_valid&&!wb_empty;
   assign bridge_rsp={select_b?wb_id:r_id,select_b,cmd_addr,select_b?{DATA_W{1'b0}}:r_data,select_b?b_resp:r_resp,select_b?1'b1:r_last};
