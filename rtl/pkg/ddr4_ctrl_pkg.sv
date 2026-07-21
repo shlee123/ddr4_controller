@@ -21,6 +21,8 @@ package ddr4_ctrl_pkg;
   parameter int REQ_FIFO_DEPTH    = 16;
   parameter int RSP_FIFO_DEPTH    = 16;
   parameter int CACHE_LINES       = 64;
+  parameter int WRITE_BUFFER_DEPTH = 32;
+  parameter int VICTIM_CACHE_LINES = 16;
 
   parameter int DDR_ADDR_W = 17;
   parameter int DDR_ROW_W  = 15;
