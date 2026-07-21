@@ -18,30 +18,26 @@ module tb_ddr4_controller_m32;
     @(negedge clk);victim_insert_valid=1;victim_insert_addr=a;victim_insert_data=d;victim_insert_dirty=dirty;
     while(victim_evict_valid&&!victim_evict_ready)@(negedge clk);@(negedge clk);victim_insert_valid=0;
   end endtask
-  task lookup_victim;input[31:0]a;input[31:0]expect;begin
+  task lookup_victim;input[31:0]a;input[31:0]expected_data;begin
     @(negedge clk);victim_lookup_valid=1;victim_lookup_addr=a;#1;
-    if(!victim_lookup_hit||victim_lookup_data!==expect)begin $display("ERROR victim lookup a=%h data=%h",a,victim_lookup_data);errors=errors+1;end
+    if(!victim_lookup_hit||victim_lookup_data!==expected_data)begin $display("ERROR victim lookup a=%h data=%h",a,victim_lookup_data);errors=errors+1;end
     @(negedge clk);victim_lookup_valid=0;
   end endtask
   initial begin
     wr_valid=0;wr_addr=0;wr_data=0;wr_strb=0;mem_wr_ready=0;victim_lookup_valid=0;victim_lookup_addr=0;
     victim_insert_valid=0;victim_insert_addr=0;victim_insert_data=0;victim_insert_dirty=0;victim_evict_ready=1;invalidate=0;errors=0;
     repeat(4)@(negedge clk);rst_n=1;
-    // M30: same-word writes must merge and preserve byte enables.
     push_write(32'h1000,32'h11223344,4'b1111);
     push_write(32'h1000,32'haa00cc00,4'b1010);
     if(write_buffer_count!==1)begin $display("ERROR merge count=%0d",write_buffer_count);errors=errors+1;end
     #1;if(mem_wr_data!==32'haa22cc44||mem_wr_strb!==4'hf)begin $display("ERROR merge data=%h strb=%h",mem_wr_data,mem_wr_strb);errors=errors+1;end
     mem_wr_ready=1;@(negedge clk);mem_wr_ready=0;@(negedge clk);
     if(write_buffer_count!==0)begin $display("ERROR drain count=%0d",write_buffer_count);errors=errors+1;end
-    // Demonstrate all 32 independent entries can be accepted.
     for(i=0;i<WB_DEPTH;i=i+1)push_write(32'h2000+i*4,32'h50000000+i,4'hf);
     if(write_buffer_count!==WB_DEPTH)begin $display("ERROR default WB depth count=%0d",write_buffer_count);errors=errors+1;end
     mem_wr_ready=1;repeat(WB_DEPTH+1)@(negedge clk);mem_wr_ready=0;
-    // M31: retain 16 displaced lines and return a victim hit.
     for(i=0;i<VC_LINES;i=i+1)insert_victim(32'h4000+i*4,32'h60000000+i,1'b0);
     lookup_victim(32'h4000,32'h60000000);
-    // Fill replacement slot with dirty data, then verify dirty eviction on wrap.
     insert_victim(32'h8000,32'hdeadbeef,1'b1);
     for(i=1;i<VC_LINES;i=i+1)insert_victim(32'h8000+i*4,32'h70000000+i,1'b0);
     @(negedge clk);victim_evict_ready=0;victim_insert_valid=1;victim_insert_addr=32'hc000;victim_insert_data=32'h12345678;victim_insert_dirty=0;#1;
