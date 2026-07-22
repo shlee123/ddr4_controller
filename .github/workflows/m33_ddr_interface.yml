@@ -1,0 +1,42 @@
+name: M33 DDR Interface Optimization
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  m33:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+      - name: Verify production selection
+        run: |
+          grep -q "ddr4_scheduler_m33_alias.sv" sim/filelist/rtl_production.f
+          grep -q "ddr4_x16_data_path.sv" sim/filelist/rtl_production.f
+          grep -q "ddr4_address_mapper.sv" sim/filelist/rtl_production.f
+          ! grep -q "^../../rtl/ddr4_scheduler.sv$" sim/filelist/rtl_production.f
+      - name: Compile M33 regression
+        working-directory: sim
+        run: |
+          rm -rf build_m33
+          mkdir build_m33
+          cd build_m33
+          set -o pipefail
+          iverilog -g2012 -Wall -Wimplicit -s tb_ddr4_controller_m33 -o m33_tb -f ../filelist/m33_tb.f 2>&1 | tee compile.log
+      - name: Run M33 regression
+        working-directory: sim/build_m33
+        run: |
+          set -o pipefail
+          vvp m33_tb 2>&1 | tee sim.log
+          grep -q "PASS M33 AXI32-DQ16 mapping, address map, open-page and dual-edge read" sim.log
+      - name: Print logs
+        if: always()
+        run: |
+          test ! -f sim/build_m33/compile.log || cat sim/build_m33/compile.log
+          test ! -f sim/build_m33/sim.log || cat sim/build_m33/sim.log
