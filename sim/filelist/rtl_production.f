@@ -14,7 +14,7 @@
 ../../rtl/core/ddr4_address_mapper.sv
 ../../rtl/phy/ddr4_x16_data_path.sv
 ../../rtl/core/ddr4_scheduler_open_page.sv
-../../rtl/ddr4_scheduler.sv
+../../rtl/core/ddr4_scheduler_m33_alias.sv
 ../../rtl/phy/ddr4_fpga_clockgen.sv
 ../../rtl/phy/ddr4_ck_out.sv
 ../../rtl/phy/ddr4_dq_dqs_phy.sv
