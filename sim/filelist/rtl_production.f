@@ -11,6 +11,9 @@
 ../../rtl/core/ddr4_m30_write_buffer.sv
 ../../rtl/core/ddr4_m31_victim_cache.sv
 ../../rtl/core/ddr4_m32_cache_subsystem.sv
+../../rtl/core/ddr4_address_mapper.sv
+../../rtl/phy/ddr4_x16_data_path.sv
+../../rtl/core/ddr4_scheduler_open_page.sv
 ../../rtl/ddr4_scheduler.sv
 ../../rtl/phy/ddr4_fpga_clockgen.sv
 ../../rtl/phy/ddr4_ck_out.sv
