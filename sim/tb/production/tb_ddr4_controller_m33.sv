@@ -20,10 +20,10 @@ module tb_ddr4_controller_m33;
     repeat(3)@(negedge clk);rst_n=1;
     axi_addr={1'b0,15'h1234,2'b10,2'b01,10'h155,2'b00};#1;
     if(row!==15'h1234||bg!==2'b10||bank!==2'b01||col!==10'h155)begin $display("ERROR address map");errors=errors+1;end
-    wr_data=32'hA1B2_C3D4;wr_strb=4'b1011;wr_enable=1;#1;
-    if(dq_out!==16'hC3D4||dm_n!==2'b00)begin $display("ERROR write rising half");errors=errors+1;end
+    wr_data=32'hA1B2_C3D4;wr_strb=4'b1011;wr_enable=1;
+    @(posedge clk);#1;if(dq_out!==16'hC3D4||dm_n!==2'b00)begin $display("ERROR write rising half");errors=errors+1;end
     @(negedge clk);#1;if(dq_out!==16'hA1B2||dm_n!==2'b01)begin $display("ERROR write falling half");errors=errors+1;end
-    wr_enable=0;rd_en=1;dq_in=16'h3344;@(negedge clk);dq_in=16'h1122;@(posedge clk);#1;
+    wr_enable=0;rd_en=1;dq_in=16'h3344;@(negedge clk);#1;dq_in=16'h1122;@(posedge clk);#1;
     if(!rd_valid||rd_data!==32'h1122_3344)begin $display("ERROR dual-edge read %h",rd_data);errors=errors+1;end rd_en=0;
     wait(init_done);send_write(32'h0012_3000,32'h11112222);send_write(32'h0012_3004,32'h33334444);
     if(act_count!==1||pre_count!==0)begin $display("ERROR open page act=%0d pre=%0d",act_count,pre_count);errors=errors+1;end
