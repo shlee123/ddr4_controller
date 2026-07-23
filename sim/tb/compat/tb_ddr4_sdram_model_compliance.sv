@@ -21,7 +21,7 @@ module tb_ddr4_sdram_model_compliance;
     repeat(3)@(posedge ck_t);reset_n=1;cke=1;
     if(dut.mode_reg[0]!==16'hxxxx||dut.init_done!==0)
       $fatal(1,"MR reset state must be undefined/not initialized");
-    // Required datasheet power-up order. Values choose BL8, CL22, CWL16 and exercise features.
+    // Required power-up order. Values choose BL8, CL22, CWL16 and exercise features.
     mrs(3,16'h0008); // gear-down
     mrs(6,16'h00c9); // training, range 1, value 9
     mrs(5,16'h1c80); // RTT_PARK, DM disabled, read/write DBI
@@ -38,6 +38,8 @@ module tb_ddr4_sdram_model_compliance;
       $fatal(1,"MR5 DM/DBI decode failed");
     if(!dut.vrefdq_training_enable||!dut.vrefdq_range||dut.vrefdq_value!=9)
       $fatal(1,"MR6 VREFDQ decode failed");
+    if(!dut.read_preamble_2t||!dut.write_preamble_2t)
+      $fatal(1,"MR4 preamble decode failed");
     // Runtime MRS write must immediately synchronize functional state.
     mrs(0,16'h0040); // CL18
     if(dut.cas_latency!=18||dut.mode_reg[0]!=16'h0040)
