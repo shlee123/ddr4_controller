@@ -38,3 +38,13 @@ Planned work:
 - Add single-write, single-read and read-after-write scoreboarding.
 - Expand to AXI burst and randomized regression.
 - Replace the compatibility smoke test as the primary functional gate after equivalent production coverage is achieved.
+
+## M34 — DDR4 PHY wrapper and training
+
+Status: **IN PROGRESS**
+
+- A dedicated controller/PHY boundary owns all DQ, DQS and DM tri-state behavior.
+- Write-level and read-level sweeps calculate an independent eye center for each x16 byte lane.
+- Normal scheduler traffic is held until controller initialization and PHY training both complete.
+- APB status reports PHY done, busy and fail state.
+- The production file list and an M34 CI regression cover training and pin isolation.
