@@ -41,7 +41,7 @@ Planned work:
 
 ## M34 — DDR4 PHY wrapper and training
 
-Status: **IN PROGRESS**
+Status: **PASS**
 
 - A dedicated controller/PHY boundary owns all DQ, DQS and DM tri-state behavior.
 - Write-level and read-level sweeps calculate an independent eye center for each x16 byte lane.
