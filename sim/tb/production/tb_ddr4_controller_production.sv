@@ -79,6 +79,11 @@ module tb_ddr4_controller_production;
   integer act_count;
   integer mrs_count;
   integer zq_count;
+  integer ck_count;
+  integer zq_cycle;
+  integer mrs_cycle [0:6];
+  logic [2:0] mrs_index [0:6];
+  logic [16:0] mrs_value [0:6];
 
   initial begin
     axi_clk = 1'b0;
@@ -143,13 +148,24 @@ module tb_ddr4_controller_production;
   // DDR4 command truth table with ACT_n deasserted:
   // MRS = RAS_n/CAS_n/WE_n 000, ZQCL/ZQCS = 110.
   always @(posedge ddr_ck_t) begin
+    ck_count = ck_count + 1;
     if (ddr_reset_n && ddr_cke && !ddr_cs_n) begin
       if (!ddr_act_n) begin
         act_count = act_count + 1;
       end else begin
         case ({ddr_ras_n, ddr_cas_n, ddr_we_n})
-          3'b000: mrs_count = mrs_count + 1;
-          3'b110: zq_count  = zq_count + 1;
+          3'b000: begin
+            if (mrs_count < 7) begin
+              mrs_index[mrs_count] = {ddr_bg[0], ddr_ba};
+              mrs_value[mrs_count] = ddr_a;
+              mrs_cycle[mrs_count] = ck_count;
+            end
+            mrs_count = mrs_count + 1;
+          end
+          3'b110: begin
+            zq_cycle = ck_count;
+            zq_count = zq_count + 1;
+          end
           default: ;
         endcase
       end
@@ -168,6 +184,7 @@ module tb_ddr4_controller_production;
     s_axi_arsize = 3'd2; s_axi_arburst = 2'b01; s_axi_arvalid = 1'b0; s_axi_rready = 1'b1;
     paddr = '0; psel = 1'b0; penable = 1'b0; pwrite = 1'b0; pwdata = '0;
     act_count = 0; mrs_count = 0; zq_count = 0;
+    ck_count = 0; zq_cycle = -1;
 
     repeat (8) @(posedge axi_clk);
     axi_rst_n = 1'b1;
@@ -184,8 +201,22 @@ module tb_ddr4_controller_production;
 
     if (!status[0]) $fatal(1, "Timeout waiting for production controller init_done");
     if (!status[1]) $fatal(1, "DDR4 model asserted alert_n low during initialization");
-    if (mrs_count < 7) $fatal(1, "Expected at least 7 MRS commands, observed %0d", mrs_count);
-    if (zq_count < 1) $fatal(1, "Expected a ZQCL command, observed %0d", zq_count);
+    if (mrs_count != 7) $fatal(1, "Expected exactly 7 MRS commands, observed %0d", mrs_count);
+    if (zq_count != 1) $fatal(1, "Expected exactly one ZQCL command, observed %0d", zq_count);
+    if (mrs_index[0] !== 3 || mrs_index[1] !== 6 || mrs_index[2] !== 5 ||
+        mrs_index[3] !== 4 || mrs_index[4] !== 2 || mrs_index[5] !== 1 ||
+        mrs_index[6] !== 0)
+      $fatal(1, "MRS order is not MR3,MR6,MR5,MR4,MR2,MR1,MR0");
+    if (mrs_value[0] !== 17'h00000 || mrs_value[1] !== 17'h00000 ||
+        mrs_value[2] !== 17'h00000 || mrs_value[3] !== 17'h00000 ||
+        mrs_value[4] !== 17'h00000 || mrs_value[5] !== 17'h00000 ||
+        mrs_value[6] !== 17'h00110)
+      $fatal(1, "MRS initialization image does not match CL11/CWL9 BL8 configuration");
+    for (integer k = 1; k < 7; k = k + 1)
+      if ((mrs_cycle[k] - mrs_cycle[k-1]) < T_MRD_CK)
+        $fatal(1, "tMRD violated between MRS %0d and %0d", k-1, k);
+    if ((zq_cycle - mrs_cycle[6]) < T_MOD_CK)
+      $fatal(1, "tMOD violated between MR0 and ZQCL");
     if (s_axi_bvalid || s_axi_rvalid)
       $fatal(1, "Unexpected AXI response while AXI request channels were idle");
 
