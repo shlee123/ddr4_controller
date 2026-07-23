@@ -48,10 +48,17 @@ module ddr4_sdram_model
   logic dll_enable, dll_reset, mpr_enable, gear_down, pda_enable;
   logic write_crc_enable, ca_parity_enable, dm_enable;
   logic write_dbi_enable, read_dbi_enable;
+  logic read_burst_type, tdqs_enable, qoff, low_power_asr, temp_sensor_readout;
+  logic max_power_down, temp_controlled_refresh, vref_monitor, self_refresh_abort;
+  logic read_preamble_training, read_preamble_2t, write_preamble_2t;
+  logic crc_error_clear, ca_parity_error, odt_input_buffer_pd, ca_parity_persistent;
   logic vrefdq_training_enable, vrefdq_range;
   logic [5:0] vrefdq_value;
   logic [2:0] rtt_nom, rtt_wr, rtt_park;
-  logic [1:0] output_drive_strength;
+  logic [1:0] output_drive_strength, mpr_page, mpr_read_format;
+  logic [2:0] fine_granularity_refresh, write_cmd_latency, ca_parity_latency;
+  logic [2:0] cs_cmd_latency, tccd_l;
+  logic [3:0] write_recovery;
   integer act_age [0:NUM_BANKS-1];
   integer pre_age [0:NUM_BANKS-1];
   integer refresh_age, mrs_age;
@@ -113,18 +120,30 @@ module ddr4_sdram_model
       case(idx)
         0: begin burst_length=command_bl(value[1:0],1'b1);
           cas_latency=decode_cl({value[12],value[6:4],value[2]});
-          dll_reset=value[8]; end
+          read_burst_type=value[3];dll_reset=value[8];
+          write_recovery=value[11:9]; end
         1: begin dll_enable=~value[0];output_drive_strength={value[2],value[1]};
           additive_latency=decode_al(value[4:3],cas_latency);
-          rtt_nom={value[10],value[9],value[8]};end
+          rtt_nom={value[10],value[9],value[8]};
+          tdqs_enable=value[11];qoff=value[12];end
         2: begin cas_write_latency=decode_cwl(value[5:3]);
-          rtt_wr={1'b0,value[10:9]};write_crc_enable=value[12];end
-        3: begin mpr_enable=value[2];gear_down=value[3];pda_enable=value[4];end
-        4: begin end
-        5: begin ca_parity_enable=(value[2:0]!=0);rtt_park=value[8:6];
-          dm_enable=~value[10];write_dbi_enable=value[11];read_dbi_enable=value[12];end
+          low_power_asr=value[6];rtt_wr={1'b0,value[10:9]};
+          write_crc_enable=value[12];end
+        3: begin mpr_page=value[1:0];mpr_enable=value[2];gear_down=value[3];
+          pda_enable=value[4];temp_sensor_readout=value[5];
+          fine_granularity_refresh=value[8:6];write_cmd_latency=value[10:9];
+          mpr_read_format=value[12:11];end
+        4: begin max_power_down=value[1];temp_controlled_refresh=value[2];
+          vref_monitor=value[4];cs_cmd_latency=value[8:6];self_refresh_abort=value[9];
+          read_preamble_training=value[10];read_preamble_2t=value[11];
+          write_preamble_2t=value[12];end
+        5: begin ca_parity_latency=value[2:0];ca_parity_enable=(value[2:0]!=0);
+          crc_error_clear=value[3];ca_parity_error=value[4];
+          odt_input_buffer_pd=value[5];rtt_park=value[8:6];
+          ca_parity_persistent=value[9];dm_enable=~value[10];
+          write_dbi_enable=value[11];read_dbi_enable=value[12];end
         6: begin vrefdq_value=value[5:0];vrefdq_range=value[6];
-          vrefdq_training_enable=value[7];end
+          vrefdq_training_enable=value[7];tccd_l=value[12:10];end
       endcase
     end
   endtask
@@ -166,10 +185,21 @@ module ddr4_sdram_model
       dll_enable <= 1'b1; dll_reset <= 1'b0; mpr_enable <= 1'b0;
       gear_down <= 1'b0; pda_enable <= 1'b0; write_crc_enable <= 1'b0;
       ca_parity_enable <= 1'b0; dm_enable <= 1'b1;
+      read_burst_type <= 1'b0; tdqs_enable <= 1'b0; qoff <= 1'b0;
+      low_power_asr <= 1'b0; temp_sensor_readout <= 1'b0;
+      max_power_down <= 1'b0; temp_controlled_refresh <= 1'b0;
+      vref_monitor <= 1'b0; self_refresh_abort <= 1'b0;
+      read_preamble_training <= 1'b0; read_preamble_2t <= 1'b0;
+      write_preamble_2t <= 1'b0; crc_error_clear <= 1'b0;
+      ca_parity_error <= 1'b0; odt_input_buffer_pd <= 1'b0;
+      ca_parity_persistent <= 1'b0;
       write_dbi_enable <= 1'b0; read_dbi_enable <= 1'b0;
       vrefdq_training_enable <= 1'b0; vrefdq_range <= 1'b0;
       vrefdq_value <= '0; rtt_nom <= '0; rtt_wr <= '0; rtt_park <= '0;
-      output_drive_strength <= '0;
+      output_drive_strength <= '0; mpr_page <= '0; mpr_read_format <= '0;
+      fine_granularity_refresh <= '0; write_cmd_latency <= '0;
+      ca_parity_latency <= '0; cs_cmd_latency <= '0; tccd_l <= '0;
+      write_recovery <= '0;
       for (i=0; i<NUM_BANKS; i=i+1) begin
         bank_open[i] <= 1'b0;
         open_row[i] <= '0;
