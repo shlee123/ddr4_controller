@@ -1,0 +1,41 @@
+name: M34 PHY Wrapper and Training
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  m34:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+      - name: Verify production integration
+        run: |
+          grep -q "ddr4_phy_wrapper.sv" sim/filelist/rtl_production.f
+          grep -q "u_phy" rtl/ddr4_controller_top.sv
+          grep -q "native_wr_empty||!phy_init_done" rtl/ddr4_controller_top.sv
+      - name: Compile M34 regression
+        working-directory: sim
+        run: |
+          rm -rf build_m34
+          mkdir build_m34
+          cd build_m34
+          set -o pipefail
+          iverilog -g2012 -Wall -Wimplicit -s tb_ddr4_controller_m34 -o m34_tb -f ../filelist/m34_tb.f 2>&1 | tee compile.log
+      - name: Run M34 regression
+        working-directory: sim/build_m34
+        run: |
+          set -o pipefail
+          vvp m34_tb 2>&1 | tee sim.log
+          grep -q "PASS M34 PHY wrapper, x16 lane training and pin isolation" sim.log
+      - name: Print logs
+        if: always()
+        run: |
+          test ! -f sim/build_m34/compile.log || cat sim/build_m34/compile.log
+          test ! -f sim/build_m34/sim.log || cat sim/build_m34/sim.log
