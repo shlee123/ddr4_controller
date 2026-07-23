@@ -20,6 +20,9 @@ jobs:
           grep -q "ddr4_phy_wrapper.sv" sim/filelist/rtl_production.f
           grep -q "u_phy" rtl/ddr4_controller_top.sv
           grep -q "native_wr_empty||!phy_init_done" rtl/ddr4_controller_top.sv
+          grep -q "train_mrs_valid" rtl/ddr4_controller_top.sv
+          grep -q "mr1_normal | 17\u0027h00080" rtl/phy/ddr4_phy_wrapper.sv
+          grep -q "mr3_normal | 17\u0027h00004" rtl/phy/ddr4_phy_wrapper.sv
       - name: Compile M34 regression
         working-directory: sim
         run: |
@@ -33,7 +36,7 @@ jobs:
         run: |
           set -o pipefail
           vvp m34_tb 2>&1 | tee sim.log
-          grep -q "PASS M34 PHY wrapper, x16 lane training and pin isolation" sim.log
+          grep -q "PASS M34 PHY MRS sequence, x16 lane training and pin isolation" sim.log
       - name: Print logs
         if: always()
         run: |
