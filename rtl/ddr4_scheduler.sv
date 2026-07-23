@@ -97,6 +97,8 @@ module ddr4_scheduler #(
   logic [DDR_ROW_W-1:0] cur_row;
 
   localparam int MR_ADDR_COPY_W = (DDR_ADDR_W < 17) ? DDR_ADDR_W : 17;
+  localparam int T_INIT_FINAL_CK =
+    (T_ZQINIT_CK > T_DLLK_CK) ? T_ZQINIT_CK : T_DLLK_CK;
 
   assign cache_lookup_addr = cur_req.addr;
   assign cur_row = addr_row(cur_req.addr);
@@ -195,7 +197,7 @@ module ddr4_scheduler #(
       drive_des();
       ddr_reset_n       <= 1'b1;
       ddr_cke           <= 1'b1;
-      ddr_odt           <= 1'b1;
+      ddr_odt           <= init_done;
       ddr_par           <= 1'b0;
       ddr_dq_oe         <= 1'b0;
       ddr_dqs_oe        <= 1'b0;
@@ -254,7 +256,7 @@ module ddr4_scheduler #(
         end
         INIT_ZQCL: if (wait_cnt == 0) begin
           ddr_cs_n <= 1'b0; ddr_act_n <= 1'b1; ddr_ras_n <= 1'b1; ddr_cas_n <= 1'b1; ddr_we_n <= 1'b0;
-          ddr_a <= DDR_ADDR_W'(17'h00400); wait_cnt <= T_ZQINIT_CK[15:0]; state <= INIT_ZQWAIT;
+          ddr_a <= DDR_ADDR_W'(17'h00400); wait_cnt <= T_INIT_FINAL_CK[15:0]; state <= INIT_ZQWAIT;
         end
         INIT_ZQWAIT: if (wait_cnt == 0) state <= INIT_READY;
         INIT_READY: begin
