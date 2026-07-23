@@ -10,6 +10,7 @@
 ../../rtl/phy/ddr4_fpga_clockgen.sv
 ../../rtl/phy/ddr4_ck_out.sv
 ../../rtl/phy/ddr4_dq_dqs_phy.sv
+../../rtl/phy/ddr4_phy_wrapper.sv
 ../../rtl/ddr4_controller_top.sv
 ../../sim/model/ddr4_sdram_model.sv
 ../../sim/tb/production/tb_ddr4_controller_production.sv

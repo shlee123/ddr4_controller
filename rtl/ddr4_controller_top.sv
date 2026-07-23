@@ -29,7 +29,8 @@ module ddr4_controller_top #(
   typedef struct packed {logic [AXI_ID_W-1:0] id;logic [AXI_ADDR_W-1:0] addr;logic [7:0] len;logic [2:0] size;logic [1:0] burst;} axi_addr_chan_t;
   typedef struct packed {logic [AXI_DATA_W-1:0] data;logic [AXI_DATA_W/8-1:0] strb;logic last;} axi_w_chan_t;
 
-  logic init_done,init_start_axi,init_start_ddr,cfg_update_tog_axi,cfg_ack_tog_ddr,cfg_ack_sync1_axi,cfg_ack_sync2_axi,cfg_update_sync1_ddr,cfg_update_sync2_ddr,cfg_update_seen_ddr,cfg_busy_axi,init_done_sync1_axi,init_done_sync2_axi,apb_wr,apb_rd;
+  logic init_done,controller_init_done,phy_init_done,phy_init_fail,phy_training_busy;
+  logic init_start_axi,init_start_ddr,cfg_update_tog_axi,cfg_ack_tog_ddr,cfg_ack_sync1_axi,cfg_ack_sync2_axi,cfg_update_sync1_ddr,cfg_update_sync2_ddr,cfg_update_seen_ddr,cfg_busy_axi,init_done_sync1_axi,init_done_sync2_axi,apb_wr,apb_rd;
   // MT40A256M16LY-062E:F initialization image at DDR_CLK_MHZ=500.
   // MR0: BL8, sequential, CL=11, DLL reset, WR=10/RTP=5.
   // MR1: DLL enabled, AL=0. MR2: CWL=9. Optional features remain disabled.
@@ -41,6 +42,7 @@ module ddr4_controller_top #(
   localparam logic [16:0] MR5_INIT = 17'h00000;
   localparam logic [16:0] MR6_INIT = 17'h00000;
   logic [16:0] mr_axi[0:6],mr_ddr[0:6]; integer mi;
+  assign init_done=controller_init_done&&phy_init_done;
   assign cfg_busy_axi=(cfg_update_tog_axi!=cfg_ack_sync2_axi);assign apb_wr=psel&penable&pwrite&!cfg_busy_axi;assign apb_rd=psel&penable&~pwrite&!cfg_busy_axi;assign pready=psel&penable&!cfg_busy_axi;assign pslverr=1'b0;
   always_ff @(posedge axi_clk or negedge axi_rst_n) begin
     if(!axi_rst_n)begin init_start_axi<=1;cfg_update_tog_axi<=0;cfg_ack_sync1_axi<=0;cfg_ack_sync2_axi<=0;init_done_sync1_axi<=0;init_done_sync2_axi<=0;mr_axi[0]<=MR0_INIT;mr_axi[1]<=MR1_INIT;mr_axi[2]<=MR2_INIT;mr_axi[3]<=MR3_INIT;mr_axi[4]<=MR4_INIT;mr_axi[5]<=MR5_INIT;mr_axi[6]<=MR6_INIT;end
@@ -50,7 +52,7 @@ module ddr4_controller_top #(
     if(!rst_n)begin init_start_ddr<=1;cfg_ack_tog_ddr<=0;cfg_update_sync1_ddr<=0;cfg_update_sync2_ddr<=0;cfg_update_seen_ddr<=0;mr_ddr[0]<=MR0_INIT;mr_ddr[1]<=MR1_INIT;mr_ddr[2]<=MR2_INIT;mr_ddr[3]<=MR3_INIT;mr_ddr[4]<=MR4_INIT;mr_ddr[5]<=MR5_INIT;mr_ddr[6]<=MR6_INIT;end
     else begin cfg_update_sync1_ddr<=cfg_update_tog_axi;cfg_update_sync2_ddr<=cfg_update_sync1_ddr;if(cfg_update_sync2_ddr!=cfg_update_seen_ddr)begin init_start_ddr<=init_start_axi;for(mi=0;mi<7;mi=mi+1)mr_ddr[mi]<=mr_axi[mi];cfg_update_seen_ddr<=cfg_update_sync2_ddr;cfg_ack_tog_ddr<=cfg_update_sync2_ddr;end end
   end
-  always_comb begin prdata='0;if(apb_rd)case(paddr)REG_CTRL:prdata={{(APB_DATA_W-1){1'b0}},init_start_axi};REG_STATUS:prdata={{(APB_DATA_W-2){1'b0}},ddr_alert_n,init_done_sync2_axi};REG_MR0:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[0]};REG_MR1:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[1]};REG_MR2:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[2]};REG_MR3:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[3]};REG_MR4:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[4]};REG_MR5:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[5]};REG_MR6:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[6]};default:prdata='0;endcase end
+  always_comb begin prdata='0;if(apb_rd)case(paddr)REG_CTRL:prdata={{(APB_DATA_W-1){1'b0}},init_start_axi};REG_STATUS:begin prdata='0;prdata[0]=init_done_sync2_axi;prdata[1]=ddr_alert_n;prdata[2]=phy_init_done;prdata[3]=phy_training_busy;prdata[4]=phy_init_fail;end REG_MR0:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[0]};REG_MR1:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[1]};REG_MR2:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[2]};REG_MR3:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[3]};REG_MR4:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[4]};REG_MR5:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[5]};REG_MR6:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[6]};default:prdata='0;endcase end
 
   axi_addr_chan_t aw_in,aw_out,ar_in,ar_out;axi_w_chan_t w_in,w_out;
   always_comb begin aw_in.id=s_axi_awid;aw_in.addr=s_axi_awaddr;aw_in.len=s_axi_awlen;aw_in.size=s_axi_awsize;aw_in.burst=s_axi_awburst;ar_in.id=s_axi_arid;ar_in.addr=s_axi_araddr;ar_in.len=s_axi_arlen;ar_in.size=s_axi_arsize;ar_in.burst=s_axi_arburst;w_in.data=s_axi_wdata;w_in.strb=s_axi_wstrb;w_in.last=s_axi_wlast;end
@@ -81,8 +83,15 @@ module ddr4_controller_top #(
   assign rsp_rd=!rsp_hold_v&&!rsp_empty;
 
   logic [AXI_ADDR_W-1:0] cache_lookup_addr,cache_write_addr;logic cache_hit,cache_write_valid,ddr_dq_oe,ddr_dqs_oe,ddr_dm_oe;logic [AXI_DATA_W-1:0] cache_lookup_data,cache_write_data;logic [DDR_DQ_W-1:0] ddr_dq_in,ddr_dq_out;logic [DDR_DM_W-1:0] ddr_dqs_t_out,ddr_dqs_c_out,ddr_dm_n_out;
-  assign ddr_dq=ddr_dq_oe?ddr_dq_out:{DDR_DQ_W{1'bz}};assign ddr_dqs_t=ddr_dqs_oe?ddr_dqs_t_out:{DDR_DM_W{1'bz}};assign ddr_dqs_c=ddr_dqs_oe?ddr_dqs_c_out:{DDR_DM_W{1'bz}};assign ddr_dm_n=ddr_dm_oe?ddr_dm_n_out:{DDR_DM_W{1'bz}};assign ddr_dq_in=ddr_dq;
+  logic [1:0] phy_training_phase;logic [DDR_DM_W*5-1:0] phy_write_tap,phy_read_tap;
   ddr4_ck_out u_ddr_ck_out(.clk,.ck_t(ddr_ck_t),.ck_c(ddr_ck_c));
   ddr4_data_cache #(.AXI_ADDR_W(AXI_ADDR_W),.AXI_DATA_W(AXI_DATA_W),.CACHE_LINES(CACHE_LINES))u_data_cache(.clk,.rst_n,.lookup_addr(cache_lookup_addr),.lookup_hit(cache_hit),.lookup_data(cache_lookup_data),.write_valid(cache_write_valid),.write_addr(cache_write_addr),.write_data(cache_write_data),.invalidate(1'b0));
-  ddr4_scheduler #(.AXI_ADDR_W(AXI_ADDR_W),.AXI_DATA_W(AXI_DATA_W),.DDR_ADDR_W(DDR_ADDR_W),.DDR_BG_W(DDR_BG_W),.DDR_BA_W(DDR_BA_W),.DDR_DQ_W(DDR_DQ_W),.DDR_DM_W(DDR_DM_W))u_scheduler(.clk,.rst_n,.init_start(init_start_ddr),.init_done,.mr(mr_ddr),.wr_req_data(wr_req_native),.wr_req_empty(native_wr_empty),.wr_req_rd,.rd_req_data(rd_req_native),.rd_req_empty(native_rd_empty),.rd_req_rd,.rsp_data(rsp_in),.rsp_wr,.rsp_full,.cache_lookup_addr,.cache_hit,.cache_lookup_data,.cache_write_valid,.cache_write_addr,.cache_write_data,.ddr_reset_n,.ddr_cke,.ddr_cs_n,.ddr_act_n,.ddr_ras_n,.ddr_cas_n,.ddr_we_n,.ddr_bg,.ddr_ba,.ddr_a,.ddr_odt,.ddr_par,.ddr_dq_in,.ddr_dq_out,.ddr_dq_oe,.ddr_dqs_t_out,.ddr_dqs_c_out,.ddr_dqs_oe,.ddr_dm_n_out,.ddr_dm_oe);
+  ddr4_scheduler #(.AXI_ADDR_W(AXI_ADDR_W),.AXI_DATA_W(AXI_DATA_W),.DDR_ADDR_W(DDR_ADDR_W),.DDR_BG_W(DDR_BG_W),.DDR_BA_W(DDR_BA_W),.DDR_DQ_W(DDR_DQ_W),.DDR_DM_W(DDR_DM_W))u_scheduler(.clk,.rst_n,.init_start(init_start_ddr),.init_done(controller_init_done),.mr(mr_ddr),.wr_req_data(wr_req_native),.wr_req_empty(native_wr_empty||!phy_init_done),.wr_req_rd,.rd_req_data(rd_req_native),.rd_req_empty(native_rd_empty||!phy_init_done),.rd_req_rd,.rsp_data(rsp_in),.rsp_wr,.rsp_full,.cache_lookup_addr,.cache_hit,.cache_lookup_data,.cache_write_valid,.cache_write_addr,.cache_write_data,.ddr_reset_n,.ddr_cke,.ddr_cs_n,.ddr_act_n,.ddr_ras_n,.ddr_cas_n,.ddr_we_n,.ddr_bg,.ddr_ba,.ddr_a,.ddr_odt,.ddr_par,.ddr_dq_in,.ddr_dq_out,.ddr_dq_oe,.ddr_dqs_t_out,.ddr_dqs_c_out,.ddr_dqs_oe,.ddr_dm_n_out,.ddr_dm_oe);
+  ddr4_phy_wrapper #(.DQ_W(DDR_DQ_W),.DM_W(DDR_DM_W))u_phy(
+    .clk,.rst_n,.controller_init_done,.lane_sample_ok({DDR_DM_W{1'b1}}),
+    .phy_init_done,.phy_init_fail,.training_busy(phy_training_busy),.training_phase(phy_training_phase),
+    .write_level_tap(phy_write_tap),.read_level_tap(phy_read_tap),
+    .ctl_dq_out(ddr_dq_out),.ctl_dq_oe(ddr_dq_oe),.ctl_dqs_t_out(ddr_dqs_t_out),
+    .ctl_dqs_c_out(ddr_dqs_c_out),.ctl_dqs_oe(ddr_dqs_oe),.ctl_dm_n_out(ddr_dm_n_out),
+    .ctl_dm_oe(ddr_dm_oe),.ctl_dq_in(ddr_dq_in),.ddr_dq,.ddr_dqs_t,.ddr_dqs_c,.ddr_dm_n);
 endmodule : ddr4_controller_top
