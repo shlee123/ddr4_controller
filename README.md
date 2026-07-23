@@ -5,13 +5,13 @@ This package contains a synthesizable DDR4 controller reference RTL plus a VCS s
 ## Datasheet baseline
 
 The authoritative DRAM datasheet for this project is
-`docs/datasheet/MT40A512M8SA-075_F.pdf`, targeting the Micron
-`MT40A512M8SA-075:F` 4Gb (512 Meg x 8) DDR4 SDRAM. Use this document as
+`docs/datasheet/MT40A256M16LY-062EF.pdf`, targeting the Micron
+`MT40A256M16LY-062E:F` 4Gb (256 Meg x 16) DDR4 SDRAM. Use this document as
 the source of truth for device geometry, initialization, mode registers,
 commands, and timing parameters.
 
-The current RTL/simulation interface remains 16-bit DQ until the device-width
-migration is implemented and verified as a separate change.
+The current RTL/simulation interface uses 16-bit DQ with two DQS/DM byte lanes,
+matching the target device organization.
 
 ## FPGA/Vivado clock output
 
