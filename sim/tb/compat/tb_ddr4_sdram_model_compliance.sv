@@ -21,7 +21,7 @@ module tb_ddr4_sdram_model_compliance;
     repeat(3)@(posedge ck_t);reset_n=1;cke=1;
     if(dut.mode_reg[0]!==16'hxxxx||dut.init_done!==0)
       $fatal(1,"MR reset state must be undefined/not initialized");
-    // Required power-up order. Values choose BL8, CL22, CWL16 and exercise features.
+    // Required datasheet power-up order. Values choose BL8, CL22, CWL16 and exercise features.
     mrs(3,16'h0008); // gear-down
     mrs(6,16'h00c9); // training, range 1, value 9
     mrs(5,16'h1c80); // RTT_PARK, DM disabled, read/write DBI
