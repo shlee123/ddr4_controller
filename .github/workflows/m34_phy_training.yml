@@ -21,8 +21,8 @@ jobs:
           grep -q "u_phy" rtl/ddr4_controller_top.sv
           grep -q "native_wr_empty||!phy_init_done" rtl/ddr4_controller_top.sv
           grep -q "train_mrs_valid" rtl/ddr4_controller_top.sv
-          grep -q "mr1_normal | 17\u0027h00080" rtl/phy/ddr4_phy_wrapper.sv
-          grep -q "mr3_normal | 17\u0027h00004" rtl/phy/ddr4_phy_wrapper.sv
+          grep -q "mr1_normal | 17'h00080" rtl/phy/ddr4_phy_wrapper.sv
+          grep -q "mr3_normal | 17'h00004" rtl/phy/ddr4_phy_wrapper.sv
       - name: Compile M34 regression
         working-directory: sim
         run: |
