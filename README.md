@@ -2,6 +2,17 @@
 
 This package contains a synthesizable DDR4 controller reference RTL plus a VCS simulation environment.
 
+## Datasheet baseline
+
+The authoritative DRAM datasheet for this project is
+`docs/datasheet/MT40A512M8SA-075_F.pdf`, targeting the Micron
+`MT40A512M8SA-075:F` 4Gb (512 Meg x 8) DDR4 SDRAM. Use this document as
+the source of truth for device geometry, initialization, mode registers,
+commands, and timing parameters.
+
+The current RTL/simulation interface remains 16-bit DQ until the device-width
+migration is implemented and verified as a separate change.
+
 ## FPGA/Vivado clock output
 
 The Linux MPS3 FPGA flow uses Vivado by default. Define `FPGA` for FPGA
