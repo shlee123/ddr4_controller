@@ -2,7 +2,9 @@
 
 ## Datasheet Source
 
-- Micron Automotive DDR4 SDRAM, MT40A512M8 / MT40A256M16, 4Gb x8/x16, Rev. L 03/2021.
+- Authoritative project datasheet: `docs/datasheet/MT40A512M8SA-075_F.pdf`
+- Target device: Micron `MT40A512M8SA-075:F`, 4Gb DDR4 SDRAM, 512 Meg x 8
+- All future timing, initialization, mode-register, command, and simulation-model updates must be checked against this file.
 
 ## Interface Requirements
 
