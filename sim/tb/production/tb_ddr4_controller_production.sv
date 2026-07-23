@@ -81,9 +81,9 @@ module tb_ddr4_controller_production;
   integer zq_count;
   integer ck_count;
   integer zq_cycle;
-  integer mrs_cycle [0:6];
-  logic [2:0] mrs_index [0:6];
-  logic [16:0] mrs_value [0:6];
+  integer mrs_cycle [0:10];
+  logic [2:0] mrs_index [0:10];
+  logic [16:0] mrs_value [0:10];
 
   initial begin
     axi_clk = 1'b0;
@@ -155,7 +155,7 @@ module tb_ddr4_controller_production;
       end else begin
         case ({ddr_ras_n, ddr_cas_n, ddr_we_n})
           3'b000: begin
-            if (mrs_count < 7) begin
+            if (mrs_count < 11) begin
               mrs_index[mrs_count] = {ddr_bg[0], ddr_ba};
               mrs_value[mrs_count] = ddr_a;
               mrs_cycle[mrs_count] = ck_count;
@@ -201,7 +201,7 @@ module tb_ddr4_controller_production;
 
     if (!status[0]) $fatal(1, "Timeout waiting for production controller init_done");
     if (!status[1]) $fatal(1, "DDR4 model asserted alert_n low during initialization");
-    if (mrs_count != 7) $fatal(1, "Expected exactly 7 MRS commands, observed %0d", mrs_count);
+    if (mrs_count != 11) $fatal(1, "Expected 7 initialization plus 4 training MRS commands, observed %0d", mrs_count);
     if (zq_count != 1) $fatal(1, "Expected exactly one ZQCL command, observed %0d", zq_count);
     if (mrs_index[0] !== 3 || mrs_index[1] !== 6 || mrs_index[2] !== 5 ||
         mrs_index[3] !== 4 || mrs_index[4] !== 2 || mrs_index[5] !== 1 ||
@@ -212,6 +212,16 @@ module tb_ddr4_controller_production;
         mrs_value[4] !== 17'h00000 || mrs_value[5] !== 17'h00000 ||
         mrs_value[6] !== 17'h00110)
       $fatal(1, "MRS initialization image does not match CL11/CWL9 BL8 configuration");
+    if (mrs_index[7] !== 1 || mrs_value[7] !== 17'h00080 ||
+        mrs_index[8] !== 1 || mrs_value[8] !== 17'h00000 ||
+        mrs_index[9] !== 3 || mrs_value[9] !== 17'h00004 ||
+        mrs_index[10] !== 3 || mrs_value[10] !== 17'h00000)
+      $fatal(1, "PHY training MRS sequence is not MR1-WL on/off then MR3-MPR on/off");
+    for (integer t = 8; t < 11; t = t + 1)
+      if ((mrs_cycle[t] - mrs_cycle[t-1]) < T_MOD_CK)
+        $fatal(1, "tMOD violated between training MRS %0d and %0d", t-1, t);
+    if ((ck_count - mrs_cycle[10]) < T_MOD_CK)
+      $fatal(1, "init_done asserted before final training MR3 tMOD elapsed");
     for (integer k = 1; k < 7; k = k + 1)
       if ((mrs_cycle[k] - mrs_cycle[k-1]) < T_MRD_CK)
         $fatal(1, "tMRD violated between MRS %0d and %0d", k-1, k);
