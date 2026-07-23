@@ -30,14 +30,21 @@ module ddr4_controller_top #(
   typedef struct packed {logic [AXI_DATA_W-1:0] data;logic [AXI_DATA_W/8-1:0] strb;logic last;} axi_w_chan_t;
 
   logic init_done,init_start_axi,init_start_ddr,cfg_update_tog_axi,cfg_ack_tog_ddr,cfg_ack_sync1_axi,cfg_ack_sync2_axi,cfg_update_sync1_ddr,cfg_update_sync2_ddr,cfg_update_seen_ddr,cfg_busy_axi,init_done_sync1_axi,init_done_sync2_axi,apb_wr,apb_rd;
+  // MT40A256M16LY-062E:F initialization image at DDR_CLK_MHZ=500.
+  // MR0: BL8, sequential, CL=11, DLL reset, WR=10/RTP=5.
+  // MR1: DLL enabled, AL=0. MR2: CWL=9. Optional features remain disabled.
+  localparam logic [16:0] MR_INIT [0:6] = '{
+    17'h00110, 17'h00000, 17'h00000, 17'h00000,
+    17'h00000, 17'h00000, 17'h00000
+  };
   logic [16:0] mr_axi[0:6],mr_ddr[0:6]; integer mi;
   assign cfg_busy_axi=(cfg_update_tog_axi!=cfg_ack_sync2_axi);assign apb_wr=psel&penable&pwrite&!cfg_busy_axi;assign apb_rd=psel&penable&~pwrite&!cfg_busy_axi;assign pready=psel&penable&!cfg_busy_axi;assign pslverr=1'b0;
   always_ff @(posedge axi_clk or negedge axi_rst_n) begin
-    if(!axi_rst_n)begin init_start_axi<=1;cfg_update_tog_axi<=0;cfg_ack_sync1_axi<=0;cfg_ack_sync2_axi<=0;init_done_sync1_axi<=0;init_done_sync2_axi<=0;for(mi=0;mi<7;mi=mi+1)mr_axi[mi]<=mi;end
+    if(!axi_rst_n)begin init_start_axi<=1;cfg_update_tog_axi<=0;cfg_ack_sync1_axi<=0;cfg_ack_sync2_axi<=0;init_done_sync1_axi<=0;init_done_sync2_axi<=0;for(mi=0;mi<7;mi=mi+1)mr_axi[mi]<=MR_INIT[mi];end
     else begin cfg_ack_sync1_axi<=cfg_ack_tog_ddr;cfg_ack_sync2_axi<=cfg_ack_sync1_axi;init_done_sync1_axi<=init_done;init_done_sync2_axi<=init_done_sync1_axi;if(apb_wr)begin case(paddr)REG_CTRL:init_start_axi<=pwdata[0];REG_MR0:mr_axi[0]<=pwdata[16:0];REG_MR1:mr_axi[1]<=pwdata[16:0];REG_MR2:mr_axi[2]<=pwdata[16:0];REG_MR3:mr_axi[3]<=pwdata[16:0];REG_MR4:mr_axi[4]<=pwdata[16:0];REG_MR5:mr_axi[5]<=pwdata[16:0];REG_MR6:mr_axi[6]<=pwdata[16:0];default:;endcase cfg_update_tog_axi<=~cfg_update_tog_axi;end end
   end
   always_ff @(posedge clk or negedge rst_n) begin
-    if(!rst_n)begin init_start_ddr<=1;cfg_ack_tog_ddr<=0;cfg_update_sync1_ddr<=0;cfg_update_sync2_ddr<=0;cfg_update_seen_ddr<=0;for(mi=0;mi<7;mi=mi+1)mr_ddr[mi]<=mi;end
+    if(!rst_n)begin init_start_ddr<=1;cfg_ack_tog_ddr<=0;cfg_update_sync1_ddr<=0;cfg_update_sync2_ddr<=0;cfg_update_seen_ddr<=0;for(mi=0;mi<7;mi=mi+1)mr_ddr[mi]<=MR_INIT[mi];end
     else begin cfg_update_sync1_ddr<=cfg_update_tog_axi;cfg_update_sync2_ddr<=cfg_update_sync1_ddr;if(cfg_update_sync2_ddr!=cfg_update_seen_ddr)begin init_start_ddr<=init_start_axi;for(mi=0;mi<7;mi=mi+1)mr_ddr[mi]<=mr_axi[mi];cfg_update_seen_ddr<=cfg_update_sync2_ddr;cfg_ack_tog_ddr<=cfg_update_sync2_ddr;end end
   end
   always_comb begin prdata='0;if(apb_rd)case(paddr)REG_CTRL:prdata={{(APB_DATA_W-1){1'b0}},init_start_axi};REG_STATUS:prdata={{(APB_DATA_W-2){1'b0}},ddr_alert_n,init_done_sync2_axi};REG_MR0:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[0]};REG_MR1:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[1]};REG_MR2:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[2]};REG_MR3:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[3]};REG_MR4:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[4]};REG_MR5:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[5]};REG_MR6:prdata={{(APB_DATA_W-17){1'b0}},mr_axi[6]};default:prdata='0;endcase end
