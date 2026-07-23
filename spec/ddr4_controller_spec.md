@@ -2,8 +2,8 @@
 
 ## Datasheet Source
 
-- Authoritative project datasheet: `docs/datasheet/MT40A512M8SA-075_F.pdf`
-- Target device: Micron `MT40A512M8SA-075:F`, 4Gb DDR4 SDRAM, 512 Meg x 8
+- Authoritative project datasheet: `docs/datasheet/MT40A256M16LY-062EF.pdf`
+- Target device: Micron `MT40A256M16LY-062E:F`, 4Gb DDR4 SDRAM, 256 Meg x 16
 - All future timing, initialization, mode-register, command, and simulation-model updates must be checked against this file.
 
 ## Interface Requirements
