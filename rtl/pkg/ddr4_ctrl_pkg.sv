@@ -85,7 +85,8 @@ package ddr4_ctrl_pkg;
   } ddr_rsp_t;
 
   parameter int T_RCD_CK=8, T_RP_CK=8, T_RAS_CK=18, T_RC_CK=26;
-  parameter int T_MRD_CK=8, T_MOD_CK=24, T_ZQINIT_CK=512;
+  parameter int T_MRD_CK=8, T_MOD_CK=24;
+  parameter int T_DLLK_CK=768, T_ZQINIT_CK=1024;
   parameter int T_CL_CK=11, T_CWL_CK=9;
 
 endpackage : ddr4_ctrl_pkg
