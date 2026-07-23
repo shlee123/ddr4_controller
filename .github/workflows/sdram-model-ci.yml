@@ -1,0 +1,44 @@
+name: SDRAM Model Compliance
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  model_compliance:
+    name: MT40A256M16LY-062E:F model compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y iverilog
+      - name: Compile model compliance test
+        run: |
+          mkdir -p sim/build_model_compliance
+          iverilog -g2012 -Wall -Wimplicit \
+            -s tb_ddr4_sdram_model_compliance \
+            -o sim/build_model_compliance/simv \
+            sim/model/compat/ddr4_sdram_model_iverilog.sv \
+            sim/tb/compat/tb_ddr4_sdram_model_compliance.sv
+      - name: Run model compliance test
+        run: |
+          set -o pipefail
+          vvp sim/build_model_compliance/simv \
+            2>&1 | tee sim/build_model_compliance/sim.log
+          grep -q "PASS MT40A256M16LY-062E:F" \
+            sim/build_model_compliance/sim.log
+      - name: Upload model compliance log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdram-model-compliance-${{ github.run_id }}
+          path: sim/build_model_compliance/sim.log
+          if-no-files-found: warn
+          retention-days: 14
