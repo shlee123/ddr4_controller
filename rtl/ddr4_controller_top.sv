@@ -87,8 +87,16 @@ module ddr4_controller_top #(
   ddr4_ck_out u_ddr_ck_out(.clk,.ck_t(ddr_ck_t),.ck_c(ddr_ck_c));
   ddr4_data_cache #(.AXI_ADDR_W(AXI_ADDR_W),.AXI_DATA_W(AXI_DATA_W),.CACHE_LINES(CACHE_LINES))u_data_cache(.clk,.rst_n,.lookup_addr(cache_lookup_addr),.lookup_hit(cache_hit),.lookup_data(cache_lookup_data),.write_valid(cache_write_valid),.write_addr(cache_write_addr),.write_data(cache_write_data),.invalidate(1'b0));
   ddr4_scheduler #(.AXI_ADDR_W(AXI_ADDR_W),.AXI_DATA_W(AXI_DATA_W),.DDR_ADDR_W(DDR_ADDR_W),.DDR_BG_W(DDR_BG_W),.DDR_BA_W(DDR_BA_W),.DDR_DQ_W(DDR_DQ_W),.DDR_DM_W(DDR_DM_W))u_scheduler(.clk,.rst_n,.init_start(init_start_ddr),.init_done(controller_init_done),.mr(mr_ddr),.wr_req_data(wr_req_native),.wr_req_empty(native_wr_empty||!phy_init_done),.wr_req_rd,.rd_req_data(rd_req_native),.rd_req_empty(native_rd_empty||!phy_init_done),.rd_req_rd,.rsp_data(rsp_in),.rsp_wr,.rsp_full,.cache_lookup_addr,.cache_hit,.cache_lookup_data,.cache_write_valid,.cache_write_addr,.cache_write_data,.ddr_reset_n,.ddr_cke,.ddr_cs_n(sched_cs_n),.ddr_act_n(sched_act_n),.ddr_ras_n(sched_ras_n),.ddr_cas_n(sched_cas_n),.ddr_we_n(sched_we_n),.ddr_bg(sched_bg),.ddr_ba(sched_ba),.ddr_a(sched_a),.ddr_odt,.ddr_par,.ddr_dq_in,.ddr_dq_out,.ddr_dq_oe,.ddr_dqs_t_out,.ddr_dqs_c_out,.ddr_dqs_oe,.ddr_dm_n_out,.ddr_dm_oe);
-  ddr4_phy_wrapper #(.DQ_W(DDR_DQ_W),.DM_W(DDR_DM_W))u_phy(
-    .clk,.rst_n,.controller_init_done,.lane_sample_ok({DDR_DM_W{1'b1}}),
+  assign ddr_cs_n  = train_mrs_valid ? 1'b0 : sched_cs_n;
+  assign ddr_act_n = train_mrs_valid ? 1'b1 : sched_act_n;
+  assign ddr_ras_n = train_mrs_valid ? 1'b0 : sched_ras_n;
+  assign ddr_cas_n = train_mrs_valid ? 1'b0 : sched_cas_n;
+  assign ddr_we_n  = train_mrs_valid ? 1'b0 : sched_we_n;
+  assign ddr_bg = train_mrs_valid ? ((train_mrs_index >= 3'd4) ? {{(DDR_BG_W-1){1'b0}},1'b1} : {DDR_BG_W{1'b0}}) : sched_bg;
+  assign ddr_ba = train_mrs_valid ? ((train_mrs_index >= 3'd4) ? train_mrs_index-3'd4 : train_mrs_index) : sched_ba;
+  assign ddr_a = train_mrs_valid ? train_mrs_value : sched_a;
+  ddr4_phy_wrapper #(.DQ_W(DDR_DQ_W),.DM_W(DDR_DM_W),.T_MOD_CK(T_MOD_CK))u_phy(
+    .clk,.rst_n,.controller_init_done,.mr1_normal(mr_ddr[1]),.mr3_normal(mr_ddr[3]),.lane_sample_ok({DDR_DM_W{1'b1}}),
     .phy_init_done,.phy_init_fail,.training_busy(phy_training_busy),.training_phase(phy_training_phase),
     .write_level_tap(phy_write_tap),.read_level_tap(phy_read_tap),\n    .train_mrs_valid,.train_mrs_index,.train_mrs_value,
     .ctl_dq_out(ddr_dq_out),.ctl_dq_oe(ddr_dq_oe),.ctl_dqs_t_out(ddr_dqs_t_out),
